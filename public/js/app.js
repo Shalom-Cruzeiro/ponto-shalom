@@ -361,15 +361,15 @@ async function renderRel() {
       <div class="metric"><div class="ml">Fotos salvas</div><div class="mv">${totalF}</div></div>`
     const statusBadge = (f) => {
       if (!f.saldo && f.saldo !== 0) return f.entradas > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem ponto</span>'
-      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(f.saldo)} extra</span>`
-      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(f.saldo)} a compensar</span>`
+      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(Math.abs(f.saldo))} extra</span>`
+      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(Math.abs(f.saldo))} a compensar</span>`
       if (f.entradas > 0) return '<span class="badge bk">Regular</span>'
       return '<span class="badge bg">Sem ponto</span>'
     }
     rb.innerHTML = funcs.map(f => {
       const pct = Math.min(100, f.jornadaEsperada > 0 ? Math.round((f.minTrab / f.jornadaEsperada) * 100) : 0)
       const corBarra = f.saldo > cfg.tolerancia_min ? '#E24B4A' : f.saldo < -cfg.tolerancia_min ? '#BA7517' : '#185FA5'
-      const saldoTexto = f.saldo > 0 ? `+${fmtH(f.saldo)}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
+      const saldoTexto = f.saldo > 0 ? `+${fmtH(Math.abs(f.saldo))}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
       const corSaldo = f.saldo > cfg.tolerancia_min ? 'var(--red)' : f.saldo < -cfg.tolerancia_min ? 'var(--warn)' : 'var(--green)'
       return `<tr>
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
@@ -944,3 +944,4 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
+
