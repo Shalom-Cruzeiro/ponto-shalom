@@ -83,7 +83,7 @@ async function initDB() {
       await dbRun('INSERT OR IGNORE INTO config (loja_id) VALUES (?)', [l.id])
     }
   }
-  console.log('Banco de dados pronto.')
+  console.log('Banco de dados pronto.'); try { require('./atualizar_lojas') } catch(e) { console.log('Script lojas:', e.message) }
 }
 
 app.use(express.json({ limit: '10mb' }))
@@ -336,3 +336,4 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
