@@ -337,3 +337,4 @@ initDB().then(() => {
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
 
+
