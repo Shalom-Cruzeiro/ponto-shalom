@@ -924,7 +924,7 @@ function gerarPDFDetalhe() {
   const totalMins = dias.reduce((s, d) => s + calcMins(porDia[d] || {}), 0)
   const fy = doc.lastAutoTable.finalY + 6
   doc.setFontSize(9); doc.setTextColor(80, 80, 80)
-  doc.text(`Total de dias trabalhados: ${totalDias}   |   Total de horas: ${fmtH(Math.round(totalMins))}`, margem, fy)
+  const jornadaEsp = totalDias * CONFIG.horas_diarias * 60; const saldoMin = Math.round(totalMins) - jornadaEsp; const saldoTxt = saldoMin > 0 ? "+" + fmtH(saldoMin) + " (horas extras)" : saldoMin < 0 ? "-" + fmtH(Math.abs(saldoMin)) + " (a compensar)" : "0h (regular)"; doc.text(`Total dias: ${totalDias} | Horas trab.: ${fmtH(Math.round(totalMins))} | Jornada esperada: ${fmtH(jornadaEsp)} | Saldo: ${saldoTxt}`, margem, fy)
 
   // Assinaturas
   const sigY = fy + 20
@@ -944,6 +944,7 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
+
 
 
 
