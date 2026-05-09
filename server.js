@@ -35,33 +35,33 @@ try {
 async function initDB() {
   await dbRun(`CREATE TABLE IF NOT EXISTS lojas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE NOT NULL, senha TEXT NOT NULL DEFAULT '1234')`)
   await dbRun(`CREATE TABLE IF NOT EXISTS config (loja_id INTEGER PRIMARY KEY, horas_diarias INTEGER DEFAULT 8, tolerancia_min INTEGER DEFAULT 10, dias_fotos INTEGER DEFAULT 30)`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'FuncionÃ¡rio', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionrio', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, dt TEXT NOT NULL, foto_arquivo TEXT)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS escala (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, data TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'trabalha', horas REAL NOT NULL DEFAULT 8, UNIQUE(funcionario_id, data))`)
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {}
 
   const lojas = [
-    'Loja do Cruzeiro - EstaÃ§Ã£o',
+    'Loja do Cruzeiro - Estacao',
     'Loja do Cruzeiro - DelRey',
     'Loja do Cruzeiro - Betim',
     'Loja do Cruzeiro - Minas',
     'Loja do Cruzeiro - BH Outlet',
     'Loja do Cruzeiro - ViaShopping',
-    'Loja do Cruzeiro - ItaÃº',
+    'Loja do Cruzeiro - Itau',
     'Loja do Cruzeiro - Boulevard',
     'Loja do Cruzeiro - Ipatinga',
     'Loja do Cruzeiro - Shopping Cidade',
     'Loja do Cruzeiro - Savassi',
     'Loja do Cruzeiro - Valadares',
-    'Loja do Cruzeiro - Itabira'
+    'Loja do Cruzeiro - Itau'
   ]
   // Atualizar nomes das lojas existentes na ordem correta
   const lojasExistentes = await dbAll('SELECT id FROM lojas ORDER BY id')
   for (let i = 0; i < lojasExistentes.length && i < lojas.length; i++) {
     await dbRun('UPDATE lojas SET nome = ? WHERE id = ?', [lojas[i], lojasExistentes[i].id])
   }
-  // Inserir lojas que nÃ£o existem ainda
+  // Inserir lojas que no existem ainda
   for (const nome of lojas) {
     await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?, ?)', [nome, '1234'])
     await dbRun('INSERT OR IGNORE INTO config (loja_id) SELECT id FROM lojas WHERE nome = ?', [nome])
@@ -75,7 +75,7 @@ app.use(express.static(path.join(__dirname, 'public')))
 const sessions = {}
 function auth(req, res, next) {
   const token = req.headers['x-session']
-  if (!token || !sessions[token]) return res.status(401).json({ erro: 'NÃ£o autenticado' })
+  if (!token || !sessions[token]) return res.status(401).json({ erro: 'No autenticado' })
   req.session = sessions[token]
   next()
 }
@@ -84,7 +84,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const { loja, senha } = req.body
     const row = await dbGet('SELECT * FROM lojas WHERE nome = ?', [loja])
-    if (!row) return res.status(404).json({ erro: 'Loja nÃ£o encontrada' })
+    if (!row) return res.status(404).json({ erro: 'Loja no encontrada' })
     if (row.senha !== senha && senha !== 'master2024') return res.status(401).json({ erro: 'Senha incorreta' })
     const token = Math.random().toString(36).slice(2) + Date.now()
     sessions[token] = { lojaId: row.id, lojaNome: row.nome, role: senha === 'master2024' ? 'master' : 'gerente' }
@@ -106,8 +106,8 @@ app.get('/api/funcionarios', auth, async (req, res) => {
 app.post('/api/funcionarios', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
-    if (!nome) return res.status(400).json({ erro: 'Nome obrigatÃ³rio' })
-    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'FuncionÃ¡rio', hora_inicio || null, hora_fim || null])
+    if (!nome) return res.status(400).json({ erro: 'Nome obrigatrio' })
+    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionrio', hora_inicio || null, hora_fim || null])
     res.json({ id: r.lastID || r.lastInsertRowid, nome, cargo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -138,7 +138,7 @@ app.post('/api/registros', auth, async (req, res) => {
     const { funcionarioId, tipo, fotoBase64 } = req.body
     if (!funcionarioId || !tipo) return res.status(400).json({ erro: 'Dados incompletos' })
     const func = await dbGet('SELECT * FROM funcionarios WHERE id = ? AND loja_id = ?', [funcionarioId, req.session.lojaId])
-    if (!func) return res.status(404).json({ erro: 'FuncionÃ¡rio nÃ£o encontrado' })
+    if (!func) return res.status(404).json({ erro: 'Funcionrio no encontrado' })
 
     const TOLERANCIA_MIN = 5
     if (func.hora_inicio && func.hora_fim && (tipo === 'entrada' || tipo === 'saida')) {
@@ -148,9 +148,9 @@ app.post('/api/registros', auth, async (req, res) => {
       const minutosAgora = agora.getHours() * 60 + agora.getMinutes()
       if (tipo === 'entrada') {
         const cedo = (hIni * 60 + mIni) - minutosAgora
-        if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda nÃ£o iniciou sua jornada, aproveite seu perÃ­odo de descanso! Seu horÃ¡rio comeÃ§a Ã s ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
+        if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda no iniciou sua jornada, aproveite seu perodo de descanso! Seu horrio comea s ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
       }
-      // SaÃ­da: nunca bloqueia â€” horas negativas sÃ£o calculadas no relatÃ³rio
+      // Sada: nunca bloqueia  horas negativas so calculadas no relatrio
     }
 
     let fotoArquivo = null
@@ -182,7 +182,7 @@ app.get('/api/fotos', auth, async (req, res) => {
 
 app.get('/fotos/:arquivo', auth, (req, res) => {
   const filePath = path.join(FOTOS_DIR, path.basename(req.params.arquivo))
-  if (!fs.existsSync(filePath)) return res.status(404).send('NÃ£o encontrado')
+  if (!fs.existsSync(filePath)) return res.status(404).send('No encontrado')
   res.sendFile(filePath)
 })
 
@@ -249,7 +249,7 @@ app.put('/api/lojas/:id/senha', auth, async (req, res) => {
 app.get('/api/escala', auth, async (req, res) => {
   try {
     const { funcId, mes, ano } = req.query
-    if (!funcId || !mes || !ano) return res.status(400).json({ erro: 'ParÃ¢metros incompletos' })
+    if (!funcId || !mes || !ano) return res.status(400).json({ erro: 'Parmetros incompletos' })
     const inicio = `${ano}-${String(mes).padStart(2,'0')}-01`
     const fim = `${ano}-${String(mes).padStart(2,'0')}-31`
     const dias = await dbAll('SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data',
@@ -314,9 +314,12 @@ app.get('/api/relatorio', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-initDB().then(() => {
+initDB().then(() => { try { require('./atualizar_lojas') } catch(_) {} }).then(() => {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\nâœ… Sistema de Ponto rodando em http://localhost:${PORT}`)
+    console.log(`\n Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
+
+
 
