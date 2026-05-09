@@ -1,4 +1,4 @@
-﻿const express = require('express')
+const express = require('express')
 const path = require('path')
 const fs = require('fs')
 
@@ -63,7 +63,7 @@ async function initDB() {
   }
   // Inserir lojas que no existem ainda
   for (const nome of lojas) {
-    await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?, ?)', [nome, '1234'])
+    await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?,?) --skip', [nome, '1234'])
     await dbRun('INSERT OR IGNORE INTO config (loja_id) SELECT id FROM lojas WHERE nome = ?', [nome])
   }
   console.log('Banco de dados pronto.')
@@ -319,6 +319,7 @@ initDB().then(() => { try { require('./atualizar_lojas') } catch(_) {} }).then((
     console.log(`\n Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
 
 
 
