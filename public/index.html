@@ -242,6 +242,23 @@
         </div>
         <div id="senha-ok" class="alert alert-k" style="display:none;margin-top:10px;"><i class="ti ti-circle-check"></i><span>Senha alterada!</span></div>
       </div>
+
+      <div class="card" style="max-width:580px;" id="card-renomear-loja">
+        <div class="card-section-title">Renomear esta loja</div>
+        <div class="row gap-8">
+          <input type="text" id="novo-nome-loja" placeholder="Novo nome da loja" style="margin-bottom:0;"/>
+          <button class="btn btn-p" onclick="renomearLoja()"><i class="ti ti-pencil"></i> Renomear</button>
+        </div>
+        <div id="loja-ok" class="alert alert-k" style="display:none;margin-top:10px;"><i class="ti ti-circle-check"></i><span>Loja renomeada!</span></div>
+      </div>
+
+      <div class="card" style="max-width:760px;" id="card-todas-lojas" style="display:none;">
+        <div class="card-section-title">Todas as lojas — senhas e nomes</div>
+        <div class="table-wrap">
+          <table><thead><tr><th>Loja</th><th>Senha atual</th><th>Nova senha</th><th></th></tr></thead>
+          <tbody id="todas-lojas-body"></tbody></table>
+        </div>
+      </div>
       <div class="card" style="max-width:760px;">
         <div class="card-section-title">Funcionários cadastrados</div>
         <div class="table-wrap">

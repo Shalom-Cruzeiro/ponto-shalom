@@ -486,7 +486,7 @@ function switchTab(name, btn) {
   if (name === 'hist') renderHist()
   if (name === 'rel') renderRel()
   if (name === 'fotos') renderFotos()
-  if (name === 'cfg') renderFuncBody()
+  if (name === 'cfg') { renderFuncBody(); if (SESSION.role === 'master') renderTodasLojas() }
   if (name === 'apuracao') initApuracao()
 }
 
@@ -696,6 +696,48 @@ function calcMins(d) {
   let pausaMins = 0
   if (d.pausa && d.volta) pausaMins = (new Date(d.volta) - new Date(d.pausa)) / 60000
   return Math.max(0, (new Date(d.saida) - new Date(d.entrada)) / 60000 - pausaMins)
+}
+
+async function renomearLoja() {
+  const nome = el('novo-nome-loja').value.trim()
+  if (!nome) { alert('Informe o novo nome.'); return }
+  try {
+    const r = await api('PUT', '/loja/renomear', { nome })
+    SESSION.lojaNome = r.nome
+    el('hdr-loja').textContent = r.nome
+    el('novo-nome-loja').value = ''
+    el('loja-ok').style.display = 'flex'
+    setTimeout(() => el('loja-ok').style.display = 'none', 2500)
+    // Recarregar lista de lojas
+    const lojas = await api('GET', '/lojas')
+    const ll = el('ll'); if(ll){ ll.innerHTML='<option value="">— Selecione a loja —</option>'; lojas.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;ll.appendChild(o)}) }
+  } catch (e) { alert('Erro: ' + e.message) }
+}
+
+async function renderTodasLojas() {
+  if (SESSION.role !== 'master') return
+  try {
+    const lojas = await api('GET', '/lojas/todas')
+    const tb = el('todas-lojas-body'); if (!tb) return
+    tb.innerHTML = lojas.map(l => `<tr>
+      <td><strong>${l.nome}</strong></td>
+      <td><span class="badge bg">${l.senha}</span></td>
+      <td><input type="password" id="senha-loja-${l.id}" placeholder="Nova senha" style="width:140px;margin-bottom:0;padding:7px 10px;font-size:12px;"/></td>
+      <td><button class="btn btn-sm btn-i" onclick="alterarSenhaLoja(${l.id})"><i class="ti ti-lock"></i> Salvar</button></td>
+    </tr>`).join('')
+    el('card-todas-lojas').style.display = 'block'
+  } catch(_) {}
+}
+
+async function alterarSenhaLoja(id) {
+  const s = el(`senha-loja-${id}`).value
+  if (!s || s.length < 4) { alert('Mínimo 4 caracteres.'); return }
+  try {
+    await api('PUT', `/lojas/${id}/senha`, { senha: s })
+    el(`senha-loja-${id}`).value = ''
+    alert('Senha alterada!')
+    renderTodasLojas()
+  } catch (e) { alert('Erro: ' + e.message) }
 }
 
 // Iniciar
