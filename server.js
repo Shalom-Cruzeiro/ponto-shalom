@@ -144,7 +144,7 @@ app.post('/api/registros', auth, async (req, res) => {
       const agora = new Date()
       const [hIni, mIni] = func.hora_inicio.split(':').map(Number)
       const [hFim, mFim] = func.hora_fim.split(':').map(Number)
-      const minutosAgora = agora.getHours() * 60 + agora.getMinutes()
+      const br = new Date(new Date().toLocaleString("en-US",{timeZone:"America/Sao_Paulo"})); const minutosAgora = br.getHours() * 60 + br.getMinutes()
       if (tipo === 'entrada') {
         const cedo = (hIni * 60 + mIni) - minutosAgora
         if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
@@ -281,4 +281,5 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
 
