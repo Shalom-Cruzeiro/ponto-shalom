@@ -149,10 +149,7 @@ app.post('/api/registros', auth, async (req, res) => {
         const cedo = (hIni * 60 + mIni) - minutosAgora
         if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
       }
-      if (tipo === 'saida') {
-        const antes = (hFim * 60 + mFim) - minutosAgora
-        if (antes > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'antes', mensagem: `Sua jornada vai até às ${func.hora_fim}. Você ainda tem ${antes} minuto(s) de jornada.` })
-      }
+      // Saída: nunca bloqueia — horas negativas são calculadas no relatório
     }
 
     let fotoArquivo = null
