@@ -327,7 +327,7 @@ async function renderFotos() {
     const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
     grid.innerHTML = fotos.map(f => `
       <div class="foto-card">
-        <img src="/fotos/${f.foto_arquivo}?t=${TOKEN}" alt="Foto de ${f.funcNome}"/>
+        <img src="/fotos/${f.foto_arquivo}" alt="Foto de ${f.funcNome}"/>
         <div style="font-size:12px;font-weight:500;margin-bottom:3px;">${f.funcNome}</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${fmtDT(f.dt)}</div>
         <span class="badge ${BC[f.tipo]}">${L[f.tipo]}</span>
@@ -944,6 +944,7 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
+
 
 
 
