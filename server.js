@@ -35,7 +35,7 @@ try {
 async function initDB() {
   await dbRun(`CREATE TABLE IF NOT EXISTS lojas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE NOT NULL, senha TEXT NOT NULL DEFAULT '1234')`)
   await dbRun(`CREATE TABLE IF NOT EXISTS config (loja_id INTEGER PRIMARY KEY, horas_diarias INTEGER DEFAULT 8, tolerancia_min INTEGER DEFAULT 10, dias_fotos INTEGER DEFAULT 30)`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionrio', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, dt TEXT NOT NULL, foto_arquivo TEXT)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS escala (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, data TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'trabalha', horas REAL NOT NULL DEFAULT 8, UNIQUE(funcionario_id, data))`)
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
@@ -54,17 +54,34 @@ async function initDB() {
     'Loja do Cruzeiro - Shopping Cidade',
     'Loja do Cruzeiro - Savassi',
     'Loja do Cruzeiro - Valadares',
-    'Loja do Cruzeiro - Itau'
+    'Loja do Cruzeiro - Itabira'
   ]
-  // Atualizar nomes das lojas existentes na ordem correta
-  const lojasExistentes = await dbAll('SELECT id FROM lojas ORDER BY id')
-  for (let i = 0; i < lojasExistentes.length && i < lojas.length; i++) {
-    await dbRun('UPDATE lojas SET nome = ? WHERE id = ?', [lojas[i], lojasExistentes[i].id])
-  }
-  // Inserir lojas que no existem ainda
-  for (const nome of lojas) {
-    await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?,?) --skip', [nome, '1234'])
-    await dbRun('INSERT OR IGNORE INTO config (loja_id) SELECT id FROM lojas WHERE nome = ?', [nome])
+  // Garantir que existem lojas no banco
+  const lojasExistentes = await dbAll('SELECT id, nome FROM lojas ORDER BY id')
+  if (lojasExistentes.length === 0) {
+    for (const nome of lojas) {
+      await dbRun('INSERT INTO lojas (nome, senha) VALUES (?, ?)', [nome, '1234'])
+    }
+    const novas = await dbAll('SELECT id FROM lojas ORDER BY id')
+    for (const l of novas) {
+      await dbRun('INSERT OR IGNORE INTO config (loja_id) VALUES (?)', [l.id])
+    }
+  } else {
+    // Banco existente — atualizar nomes usando DELETE+INSERT para evitar conflito UNIQUE
+    for (let i = 0; i < lojasExistentes.length && i < lojas.length; i++) {
+      const idAtual = lojasExistentes[i].id
+      const nomeNovo = lojas[i]
+      const nomeAtual = lojasExistentes[i].nome
+      if (nomeAtual !== nomeNovo) {
+        // Apagar possível duplicata e atualizar
+        await dbRun('DELETE FROM lojas WHERE nome = ? AND id != ?', [nomeNovo, idAtual])
+        try { await dbRun('UPDATE lojas SET nome = ? WHERE id = ?', [nomeNovo, idAtual]) } catch(_) {}
+      }
+    }
+    const todas = await dbAll('SELECT id FROM lojas ORDER BY id')
+    for (const l of todas) {
+      await dbRun('INSERT OR IGNORE INTO config (loja_id) VALUES (?)', [l.id])
+    }
   }
   console.log('Banco de dados pronto.')
 }
@@ -75,7 +92,7 @@ app.use(express.static(path.join(__dirname, 'public')))
 const sessions = {}
 function auth(req, res, next) {
   const token = req.headers['x-session']
-  if (!token || !sessions[token]) return res.status(401).json({ erro: 'No autenticado' })
+  if (!token || !sessions[token]) return res.status(401).json({ erro: 'Não autenticado' })
   req.session = sessions[token]
   next()
 }
@@ -84,7 +101,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const { loja, senha } = req.body
     const row = await dbGet('SELECT * FROM lojas WHERE nome = ?', [loja])
-    if (!row) return res.status(404).json({ erro: 'Loja no encontrada' })
+    if (!row) return res.status(404).json({ erro: 'Loja não encontrada' })
     if (row.senha !== senha && senha !== 'master2024') return res.status(401).json({ erro: 'Senha incorreta' })
     const token = Math.random().toString(36).slice(2) + Date.now()
     sessions[token] = { lojaId: row.id, lojaNome: row.nome, role: senha === 'master2024' ? 'master' : 'gerente' }
@@ -106,8 +123,8 @@ app.get('/api/funcionarios', auth, async (req, res) => {
 app.post('/api/funcionarios', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
-    if (!nome) return res.status(400).json({ erro: 'Nome obrigatrio' })
-    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionrio', hora_inicio || null, hora_fim || null])
+    if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
+    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null])
     res.json({ id: r.lastID || r.lastInsertRowid, nome, cargo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -138,7 +155,7 @@ app.post('/api/registros', auth, async (req, res) => {
     const { funcionarioId, tipo, fotoBase64 } = req.body
     if (!funcionarioId || !tipo) return res.status(400).json({ erro: 'Dados incompletos' })
     const func = await dbGet('SELECT * FROM funcionarios WHERE id = ? AND loja_id = ?', [funcionarioId, req.session.lojaId])
-    if (!func) return res.status(404).json({ erro: 'Funcionrio no encontrado' })
+    if (!func) return res.status(404).json({ erro: 'Funcionário não encontrado' })
 
     const TOLERANCIA_MIN = 5
     if (func.hora_inicio && func.hora_fim && (tipo === 'entrada' || tipo === 'saida')) {
@@ -148,9 +165,9 @@ app.post('/api/registros', auth, async (req, res) => {
       const minutosAgora = agora.getHours() * 60 + agora.getMinutes()
       if (tipo === 'entrada') {
         const cedo = (hIni * 60 + mIni) - minutosAgora
-        if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda no iniciou sua jornada, aproveite seu perodo de descanso! Seu horrio comea s ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
+        if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
       }
-      // Sada: nunca bloqueia  horas negativas so calculadas no relatrio
+      // Saída: nunca bloqueia — horas negativas são calculadas no relatório
     }
 
     let fotoArquivo = null
@@ -182,7 +199,7 @@ app.get('/api/fotos', auth, async (req, res) => {
 
 app.get('/fotos/:arquivo', auth, (req, res) => {
   const filePath = path.join(FOTOS_DIR, path.basename(req.params.arquivo))
-  if (!fs.existsSync(filePath)) return res.status(404).send('No encontrado')
+  if (!fs.existsSync(filePath)) return res.status(404).send('Não encontrado')
   res.sendFile(filePath)
 })
 
@@ -249,7 +266,7 @@ app.put('/api/lojas/:id/senha', auth, async (req, res) => {
 app.get('/api/escala', auth, async (req, res) => {
   try {
     const { funcId, mes, ano } = req.query
-    if (!funcId || !mes || !ano) return res.status(400).json({ erro: 'Parmetros incompletos' })
+    if (!funcId || !mes || !ano) return res.status(400).json({ erro: 'Parâmetros incompletos' })
     const inicio = `${ano}-${String(mes).padStart(2,'0')}-01`
     const fim = `${ano}-${String(mes).padStart(2,'0')}-31`
     const dias = await dbAll('SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data',
@@ -314,13 +331,8 @@ app.get('/api/relatorio', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-initDB().then(() => { try { require('./atualizar_lojas') } catch(_) {} }).then(() => {
+initDB().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n Sistema de Ponto rodando em http://localhost:${PORT}`)
+    console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
-
-
-
-
-
