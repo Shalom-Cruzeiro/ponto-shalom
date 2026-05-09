@@ -504,6 +504,7 @@ function switchTab(name, btn) {
   if (name === 'fotos') renderFotos()
   if (name === 'cfg') { renderFuncBody(); if (SESSION.role === 'master') renderTodasLojas() }
   if (name === 'apuracao') initApuracao()
+  if (name === 'escala') initEscala()
 }
 
 function setStepDots(active) {
@@ -576,10 +577,25 @@ async function renderApuracao() {
         minsTrabalhados += calcMins(d)
       })
       minsTrabalhados = Math.round(minsTrabalhados)
-      // Jornada esperada baseada nos dias por semana do funcionário
-      const diasPorSemana = func.dias_semana || 5
-      const diasEsperados = Math.round(diasUteis * diasPorSemana / 5)
-      const minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
+      // Calcular jornada esperada pela escala cadastrada
+      let minsEsperados = 0
+      let diasEsperados = 0
+      try {
+        const escalaTotal = await api('GET', `/escala/total?funcId=${func.id}&mes=${mes}&ano=${ano}`)
+        if (escalaTotal.totalDias > 0) {
+          minsEsperados = escalaTotal.totalHoras * 60
+          diasEsperados = escalaTotal.totalDias
+        } else {
+          // Fallback: usar dias por semana
+          const dpw = func.dias_semana || 5
+          diasEsperados = Math.round(diasUteis * dpw / 5)
+          minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
+        }
+      } catch(_) {
+        const dpw = func.dias_semana || 5
+        diasEsperados = Math.round(diasUteis * dpw / 5)
+        minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
+      }
       const saldoMins = minsTrabalhados - minsEsperados
       const minsExtras = Math.max(0, saldoMins)
       const faltas = Math.max(0, diasEsperados - diasTrabalhados)
@@ -763,6 +779,103 @@ async function alterarSenhaLoja(id) {
     alert('Senha alterada!')
     renderTodasLojas()
   } catch (e) { alert('Erro: ' + e.message) }
+}
+
+// --- Escala de trabalho ---
+const DIAS_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
+
+function initEscala() {
+  const anoSel = el('escala-ano')
+  const anoAtual = new Date().getFullYear()
+  anoSel.innerHTML = ''
+  for (let a = anoAtual; a >= anoAtual - 2; a--) {
+    const o = document.createElement('option'); o.value = a; o.textContent = a; anoSel.appendChild(o)
+  }
+  el('escala-mes').value = new Date().getMonth() + 1
+
+  const ef = el('escala-func')
+  ef.innerHTML = '<option value="">— Selecione o funcionário —</option>'
+  FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; ef.appendChild(o) })
+}
+
+async function renderEscala() {
+  const funcId = el('escala-func').value
+  const mes = parseInt(el('escala-mes').value)
+  const ano = parseInt(el('escala-ano').value)
+  const cal = el('escala-cal')
+
+  if (!funcId) { cal.innerHTML = '<div style="color:var(--muted);padding:20px;">Selecione um funcionário.</div>'; el('escala-total').textContent = ''; return }
+
+  // Carregar escala salva
+  const diasSalvos = await api('GET', `/escala?funcId=${funcId}&mes=${mes}&ano=${ano}`)
+  const escalaMapa = {}
+  diasSalvos.forEach(d => { escalaMapa[d.data] = { tipo: d.tipo, horas: d.horas } })
+
+  // Montar calendário
+  const primeiroDia = new Date(ano, mes - 1, 1)
+  const ultimoDia = new Date(ano, mes, 0).getDate()
+  const diaSemanaInicio = primeiroDia.getDay() // 0=dom
+
+  let totalHoras = 0
+  let totalDias = 0
+
+  // Cabeçalhos
+  let html = DIAS_SEMANA_LABEL.map(d => `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--muted);padding:4px 0;">${d}</div>`).join('')
+
+  // Células vazias antes do dia 1
+  for (let i = 0; i < diaSemanaInicio; i++) {
+    html += '<div></div>'
+  }
+
+  // Dias do mês
+  for (let dia = 1; dia <= ultimoDia; dia++) {
+    const data = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
+    const diaSemana = new Date(ano, mes - 1, dia).getDay()
+    const isDom = diaSemana === 0
+    const salvo = escalaMapa[data]
+
+    // Tipo padrão: domingo=dom, outros=trabalha
+    let tipo = salvo ? salvo.tipo : (isDom ? 'dom' : 'trabalha')
+    let horas = salvo ? salvo.horas : (isDom ? 6 : 8)
+    if (tipo === 'folga') horas = 0
+
+    if (tipo !== 'folga') { totalHoras += horas; totalDias++ }
+
+    const cores = {
+      trabalha: 'background:#EAF3DE;border:1.5px solid #3B6D11;color:#27500A;',
+      dom: 'background:#E6F1FB;border:1.5px solid #185FA5;color:#0C447C;',
+      feriado: 'background:#FCEBEB;border:1.5px solid #A32D2D;color:#791F1F;',
+      folga: 'background:var(--bg2);border:1.5px solid var(--border2);color:var(--muted);'
+    }
+    const horasLabel = horas > 0 ? `${horas}h` : '—'
+
+    html += `<div onclick="toggleEscala('${funcId}','${data}','${tipo}',${horas},${isDom?1:0})"
+      style="cursor:pointer;border-radius:8px;padding:6px 4px;text-align:center;user-select:none;${cores[tipo]}transition:opacity .15s;"
+      onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">
+      <div style="font-size:13px;font-weight:600;">${dia}</div>
+      <div style="font-size:10px;">${DIAS_SEMANA_LABEL[diaSemana]}</div>
+      <div style="font-size:11px;font-weight:500;">${horasLabel}</div>
+    </div>`
+  }
+
+  cal.innerHTML = html
+  el('escala-total').textContent = `Total previsto: ${totalDias} dias · ${fmtH(totalHoras * 60)}`
+}
+
+async function toggleEscala(funcId, data, tipoAtual, horasAtual, isDom) {
+  // Ciclo: trabalha → feriado → folga → trabalha (dom: dom → feriado → folga → dom)
+  let novoTipo, novasHoras
+  if (isDom) {
+    if (tipoAtual === 'dom') { novoTipo = 'feriado'; novasHoras = 0 }
+    else if (tipoAtual === 'feriado') { novoTipo = 'folga'; novasHoras = 0 }
+    else { novoTipo = 'dom'; novasHoras = 6 }
+  } else {
+    if (tipoAtual === 'trabalha') { novoTipo = 'feriado'; novasHoras = 0 }
+    else if (tipoAtual === 'feriado') { novoTipo = 'folga'; novasHoras = 0 }
+    else { novoTipo = 'trabalha'; novasHoras = 8 }
+  }
+  await api('PUT', '/escala', { funcionarioId: funcId, data, tipo: novoTipo, horas: novasHoras })
+  renderEscala()
 }
 
 // Iniciar

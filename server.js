@@ -35,10 +35,11 @@ try {
 async function initDB() {
   await dbRun(`CREATE TABLE IF NOT EXISTS lojas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE NOT NULL, senha TEXT NOT NULL DEFAULT '1234')`)
   await dbRun(`CREATE TABLE IF NOT EXISTS config (loja_id INTEGER PRIMARY KEY, horas_diarias INTEGER DEFAULT 8, tolerancia_min INTEGER DEFAULT 10, dias_fotos INTEGER DEFAULT 30)`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT, dias_semana INTEGER DEFAULT 5)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, dt TEXT NOT NULL, foto_arquivo TEXT)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS escala (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, data TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'trabalha', horas REAL NOT NULL DEFAULT 8, UNIQUE(funcionario_id, data))`)
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
-  try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {} try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN dias_semana INTEGER DEFAULT 5`) } catch(_) {}
+  try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {}
 
   const lojas = [
     'Loja do Cruzeiro - Estação',
@@ -106,7 +107,7 @@ app.post('/api/funcionarios', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
     if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
-    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim, dias_semana) VALUES (?, ?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null, parseInt(dias_semana) || 5])
+    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null])
     res.json({ id: r.lastID || r.lastInsertRowid, nome, cargo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -114,7 +115,7 @@ app.post('/api/funcionarios', auth, async (req, res) => {
 app.put('/api/funcionarios/:id', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
-    await dbRun('UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=?, dias_semana=? WHERE id=? AND loja_id=?', [nome, cargo, hora_inicio || null, hora_fim || null, parseInt(dias_semana) || 5, req.params.id, req.session.lojaId])
+    await dbRun('UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=? WHERE id=? AND loja_id=?', [nome, cargo, hora_inicio || null, hora_fim || null, req.params.id, req.session.lojaId])
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -144,7 +145,7 @@ app.post('/api/registros', auth, async (req, res) => {
       const agora = new Date()
       const [hIni, mIni] = func.hora_inicio.split(':').map(Number)
       const [hFim, mFim] = func.hora_fim.split(':').map(Number)
-      const br = new Date(new Date().toLocaleString("en-US",{timeZone:"America/Sao_Paulo"})); const minutosAgora = br.getHours() * 60 + br.getMinutes()
+      const minutosAgora = agora.getHours() * 60 + agora.getMinutes()
       if (tipo === 'entrada') {
         const cedo = (hIni * 60 + mIni) - minutosAgora
         if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
@@ -179,7 +180,7 @@ app.get('/api/fotos', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-app.get('/fotos/:arquivo', (req, res) => {
+app.get('/fotos/:arquivo', auth, (req, res) => {
   const filePath = path.join(FOTOS_DIR, path.basename(req.params.arquivo))
   if (!fs.existsSync(filePath)) return res.status(404).send('Não encontrado')
   res.sendFile(filePath)
@@ -245,6 +246,43 @@ app.put('/api/lojas/:id/senha', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
+app.get('/api/escala', auth, async (req, res) => {
+  try {
+    const { funcId, mes, ano } = req.query
+    if (!funcId || !mes || !ano) return res.status(400).json({ erro: 'Parâmetros incompletos' })
+    const inicio = `${ano}-${String(mes).padStart(2,'0')}-01`
+    const fim = `${ano}-${String(mes).padStart(2,'0')}-31`
+    const dias = await dbAll('SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data',
+      [funcId, req.session.lojaId, inicio, fim])
+    res.json(dias)
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+app.put('/api/escala', auth, async (req, res) => {
+  try {
+    const { funcionarioId, data, tipo, horas } = req.body
+    if (!funcionarioId || !data || !tipo) return res.status(400).json({ erro: 'Dados incompletos' })
+    if (tipo === 'folga') {
+      await dbRun('DELETE FROM escala WHERE funcionario_id=? AND data=? AND loja_id=?', [funcionarioId, data, req.session.lojaId])
+    } else {
+      await dbRun('INSERT INTO escala (funcionario_id, loja_id, data, tipo, horas) VALUES (?,?,?,?,?) ON CONFLICT(funcionario_id,data) DO UPDATE SET tipo=excluded.tipo, horas=excluded.horas',
+        [funcionarioId, req.session.lojaId, data, tipo, horas || 8])
+    }
+    res.json({ ok: true })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
+app.get('/api/escala/total', auth, async (req, res) => {
+  try {
+    const { funcId, mes, ano } = req.query
+    const inicio = `${ano}-${String(mes).padStart(2,'0')}-01`
+    const fim = `${ano}-${String(mes).padStart(2,'0')}-31`
+    const result = await dbGet('SELECT SUM(horas) as totalHoras, COUNT(*) as totalDias FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=?',
+      [funcId, req.session.lojaId, inicio, fim])
+    res.json({ totalHoras: result.totalHoras || 0, totalDias: result.totalDias || 0 })
+  } catch(e) { res.status(500).json({ erro: e.message }) }
+})
+
 app.get('/api/relatorio', auth, async (req, res) => {
   try {
     const funcs = await dbAll('SELECT * FROM funcionarios WHERE loja_id = ? AND ativo = 1', [req.session.lojaId])
@@ -281,16 +319,3 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
-
-
-
-
-
-
-
-
-
-
-
-
-
