@@ -281,3 +281,4 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
