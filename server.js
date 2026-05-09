@@ -40,7 +40,27 @@ async function initDB() {
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {}
 
-  const lojas = ['Loja 01 - Centro','Loja 02 - Norte','Loja 03 - Sul','Loja 04 - Leste','Loja 05 - Oeste','Loja 06 - Shopping A','Loja 07 - Shopping B','Loja 08 - Bairro X','Loja 09 - Bairro Y','Loja 10 - Bairro Z','Loja 11 - Marginal','Loja 12 - Industrial','Loja 13 - Aeroporto']
+  const lojas = [
+    'Loja do Cruzeiro - Estação',
+    'Loja do Cruzeiro - DelRey',
+    'Loja do Cruzeiro - Betim',
+    'Loja do Cruzeiro - Minas',
+    'Loja do Cruzeiro - BH Outlet',
+    'Loja do Cruzeiro - ViaShopping',
+    'Loja do Cruzeiro - Itaú',
+    'Loja do Cruzeiro - Boulevard',
+    'Loja do Cruzeiro - Ipatinga',
+    'Loja do Cruzeiro - Shopping Cidade',
+    'Loja do Cruzeiro - Savassi',
+    'Loja do Cruzeiro - Valadares',
+    'Loja do Cruzeiro - Itabira'
+  ]
+  // Atualizar nomes das lojas existentes na ordem correta
+  const lojasExistentes = await dbAll('SELECT id FROM lojas ORDER BY id')
+  for (let i = 0; i < lojasExistentes.length && i < lojas.length; i++) {
+    await dbRun('UPDATE lojas SET nome = ? WHERE id = ?', [lojas[i], lojasExistentes[i].id])
+  }
+  // Inserir lojas que não existem ainda
   for (const nome of lojas) {
     await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?, ?)', [nome, '1234'])
     await dbRun('INSERT OR IGNORE INTO config (loja_id) SELECT id FROM lojas WHERE nome = ?', [nome])
