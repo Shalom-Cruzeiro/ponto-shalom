@@ -1,66 +1,46 @@
 const express = require('express')
-const sqlite3 = require('sqlite3').verbose()
 const path = require('path')
 const fs = require('fs')
 
 const app = express()
-const PORT = 3000
-const DB_PATH = path.join(__dirname, 'data', 'ponto.db')
-const FOTOS_DIR = path.join(__dirname, 'fotos')
+const PORT = process.env.PORT || 3000
+const DATA_DIR = process.env.RENDER_DISK_MOUNT_PATH || process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data')
+const DB_PATH = path.join(DATA_DIR, 'ponto.db')
+const FOTOS_DIR = path.join(DATA_DIR, 'fotos')
 
-// Criar pastas se não existirem
-if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'))
-if (!fs.existsSync(FOTOS_DIR)) fs.mkdirSync(FOTOS_DIR)
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true })
+if (!fs.existsSync(FOTOS_DIR)) fs.mkdirSync(FOTOS_DIR, { recursive: true })
 
-// --- Banco de dados ---
-const db = new sqlite3.Database(DB_PATH)
+// Usar better-sqlite3 com fallback para sqlite3
+let db, dbRun, dbAll, dbGet
 
-function dbRun(sql, params=[]) {
-  return new Promise((res, rej) => db.run(sql, params, function(err) { if(err) rej(err); else res(this) }))
-}
-function dbAll(sql, params=[]) {
-  return new Promise((res, rej) => db.all(sql, params, (err, rows) => { if(err) rej(err); else res(rows) }))
-}
-function dbGet(sql, params=[]) {
-  return new Promise((res, rej) => db.get(sql, params, (err, row) => { if(err) rej(err); else res(row) }))
+try {
+  const Database = require('better-sqlite3')
+  const bdb = new Database(DB_PATH)
+  dbRun = (sql, params=[]) => { try { const s = bdb.prepare(sql); return params.length ? s.run(...params) : s.run() } catch(e) { throw e } }
+  dbAll = (sql, params=[]) => bdb.prepare(sql).all(...params)
+  dbGet = (sql, params=[]) => bdb.prepare(sql).get(...params)
+  db = bdb
+  console.log('Usando better-sqlite3')
+} catch(e) {
+  const sqlite3 = require('sqlite3').verbose()
+  const sdb = new sqlite3.Database(DB_PATH)
+  dbRun = (sql, params=[]) => new Promise((res, rej) => sdb.run(sql, params, function(err) { if(err) rej(err); else res(this) }))
+  dbAll = (sql, params=[]) => new Promise((res, rej) => sdb.all(sql, params, (err, rows) => { if(err) rej(err); else res(rows) }))
+  dbGet = (sql, params=[]) => new Promise((res, rej) => sdb.get(sql, params, (err, row) => { if(err) rej(err); else res(row) }))
+  db = sdb
+  console.log('Usando sqlite3')
 }
 
 async function initDB() {
-  await dbRun(`CREATE TABLE IF NOT EXISTS lojas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome TEXT UNIQUE NOT NULL,
-    senha TEXT NOT NULL DEFAULT '1234'
-  )`)
-  // Migração: adicionar colunas de jornada se não existirem
+  await dbRun(`CREATE TABLE IF NOT EXISTS lojas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE NOT NULL, senha TEXT NOT NULL DEFAULT '1234')`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS config (loja_id INTEGER PRIMARY KEY, horas_diarias INTEGER DEFAULT 8, tolerancia_min INTEGER DEFAULT 10, dias_fotos INTEGER DEFAULT 30)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, dt TEXT NOT NULL, foto_arquivo TEXT)`)
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {}
-  await dbRun(`CREATE TABLE IF NOT EXISTS config (
-    loja_id INTEGER PRIMARY KEY,
-    horas_diarias INTEGER DEFAULT 8,
-    tolerancia_min INTEGER DEFAULT 10,
-    dias_fotos INTEGER DEFAULT 30
-  )`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    loja_id INTEGER NOT NULL,
-    nome TEXT NOT NULL,
-    cargo TEXT DEFAULT 'Funcionário',
-    ativo INTEGER DEFAULT 1
-  )`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS registros (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    funcionario_id INTEGER NOT NULL,
-    loja_id INTEGER NOT NULL,
-    tipo TEXT NOT NULL,
-    dt TEXT NOT NULL,
-    foto_arquivo TEXT
-  )`)
 
-  const lojas = [
-    'Loja 01 - Centro','Loja 02 - Norte','Loja 03 - Sul','Loja 04 - Leste','Loja 05 - Oeste',
-    'Loja 06 - Shopping A','Loja 07 - Shopping B','Loja 08 - Bairro X','Loja 09 - Bairro Y',
-    'Loja 10 - Bairro Z','Loja 11 - Marginal','Loja 12 - Industrial','Loja 13 - Aeroporto'
-  ]
+  const lojas = ['Loja 01 - Centro','Loja 02 - Norte','Loja 03 - Sul','Loja 04 - Leste','Loja 05 - Oeste','Loja 06 - Shopping A','Loja 07 - Shopping B','Loja 08 - Bairro X','Loja 09 - Bairro Y','Loja 10 - Bairro Z','Loja 11 - Marginal','Loja 12 - Industrial','Loja 13 - Aeroporto']
   for (const nome of lojas) {
     await dbRun('INSERT OR IGNORE INTO lojas (nome, senha) VALUES (?, ?)', [nome, '1234'])
     await dbRun('INSERT OR IGNORE INTO config (loja_id) SELECT id FROM lojas WHERE nome = ?', [nome])
@@ -68,11 +48,9 @@ async function initDB() {
   console.log('Banco de dados pronto.')
 }
 
-// --- Middleware ---
 app.use(express.json({ limit: '10mb' }))
 app.use(express.static(path.join(__dirname, 'public')))
 
-// --- Sessões em memória ---
 const sessions = {}
 function auth(req, res, next) {
   const token = req.headers['x-session']
@@ -81,7 +59,6 @@ function auth(req, res, next) {
   next()
 }
 
-// --- Login/Logout ---
 app.post('/api/login', async (req, res) => {
   try {
     const { loja, senha } = req.body
@@ -94,55 +71,41 @@ app.post('/api/login', async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-app.post('/api/logout', auth, (req, res) => {
-  delete sessions[req.headers['x-session']]
-  res.json({ ok: true })
-})
+app.post('/api/logout', auth, (req, res) => { delete sessions[req.headers['x-session']]; res.json({ ok: true }) })
 
 app.get('/api/lojas', async (req, res) => {
   const lojas = await dbAll('SELECT nome FROM lojas ORDER BY nome')
   res.json(lojas.map(l => l.nome))
 })
 
-// --- Funcionários ---
 app.get('/api/funcionarios', auth, async (req, res) => {
-  const funcs = await dbAll('SELECT * FROM funcionarios WHERE loja_id = ? AND ativo = 1 ORDER BY nome', [req.session.lojaId])
-  res.json(funcs)
+  res.json(await dbAll('SELECT * FROM funcionarios WHERE loja_id = ? AND ativo = 1 ORDER BY nome', [req.session.lojaId]))
 })
 
 app.post('/api/funcionarios', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
     if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
-    const r = await dbRun(
-      'INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)',
-      [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null]
-    )
-    res.json({ id: r.lastID, nome, cargo })
+    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null])
+    res.json({ id: r.lastID || r.lastInsertRowid, nome, cargo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
 app.put('/api/funcionarios/:id', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
-    await dbRun(
-      'UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=? WHERE id=? AND loja_id=?',
-      [nome, cargo, hora_inicio || null, hora_fim || null, req.params.id, req.session.lojaId]
-    )
+    await dbRun('UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=? WHERE id=? AND loja_id=?', [nome, cargo, hora_inicio || null, hora_fim || null, req.params.id, req.session.lojaId])
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-// --- Registros ---
 app.get('/api/registros', auth, async (req, res) => {
   try {
     const { funcId, tipo, limite } = req.query
-    let sql = `SELECT r.*, f.nome as funcNome FROM registros r
-               JOIN funcionarios f ON f.id = r.funcionario_id
-               WHERE r.loja_id = ?`
+    let sql = `SELECT r.*, f.nome as funcNome FROM registros r JOIN funcionarios f ON f.id = r.funcionario_id WHERE r.loja_id = ?`
     const params = [req.session.lojaId]
     if (funcId) { sql += ' AND r.funcionario_id = ?'; params.push(funcId) }
-    if (tipo)   { sql += ' AND r.tipo = ?'; params.push(tipo) }
+    if (tipo) { sql += ' AND r.tipo = ?'; params.push(tipo) }
     sql += ' ORDER BY r.dt DESC LIMIT ?'
     params.push(parseInt(limite) || 100)
     res.json(await dbAll(sql, params))
@@ -156,40 +119,21 @@ app.post('/api/registros', auth, async (req, res) => {
     const func = await dbGet('SELECT * FROM funcionarios WHERE id = ? AND loja_id = ?', [funcionarioId, req.session.lojaId])
     if (!func) return res.status(404).json({ erro: 'Funcionário não encontrado' })
 
-    // --- Validação de jornada ---
     const TOLERANCIA_MIN = 5
     if (func.hora_inicio && func.hora_fim && (tipo === 'entrada' || tipo === 'saida')) {
       const agora = new Date()
       const [hIni, mIni] = func.hora_inicio.split(':').map(Number)
       const [hFim, mFim] = func.hora_fim.split(':').map(Number)
       const minutosAgora = agora.getHours() * 60 + agora.getMinutes()
-      const minutosInicio = hIni * 60 + mIni
-      const minutosFim = hFim * 60 + mFim
-
       if (tipo === 'entrada') {
-        const cedo = minutosInicio - minutosAgora
-        if (cedo > TOLERANCIA_MIN) {
-          const faltam = cedo - TOLERANCIA_MIN
-          return res.status(403).json({
-            bloqueado: true,
-            motivo: 'cedo',
-            mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${faltam} minuto(s).`
-          })
-        }
+        const cedo = (hIni * 60 + mIni) - minutosAgora
+        if (cedo > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'cedo', mensagem: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${func.hora_inicio}. Faltam ${cedo - TOLERANCIA_MIN} minuto(s).` })
       }
-
       if (tipo === 'saida') {
-        const antes = minutosFim - minutosAgora
-        if (antes > TOLERANCIA_MIN) {
-          return res.status(403).json({
-            bloqueado: true,
-            motivo: 'antes',
-            mensagem: `Sua jornada vai até às ${func.hora_fim}. Você ainda tem ${antes} minuto(s) de jornada.`
-          })
-        }
+        const antes = (hFim * 60 + mFim) - minutosAgora
+        if (antes > TOLERANCIA_MIN) return res.status(403).json({ bloqueado: true, motivo: 'antes', mensagem: `Sua jornada vai até às ${func.hora_fim}. Você ainda tem ${antes} minuto(s) de jornada.` })
       }
     }
-    // --- fim da validação ---
 
     let fotoArquivo = null
     if (fotoBase64) {
@@ -202,19 +146,15 @@ app.post('/api/registros', auth, async (req, res) => {
     }
 
     const dt = new Date().toISOString()
-    const r = await dbRun('INSERT INTO registros (funcionario_id, loja_id, tipo, dt, foto_arquivo) VALUES (?, ?, ?, ?, ?)',
-      [funcionarioId, req.session.lojaId, tipo, dt, fotoArquivo])
-    res.json({ id: r.lastID, dt, fotoArquivo })
+    const r = await dbRun('INSERT INTO registros (funcionario_id, loja_id, tipo, dt, foto_arquivo) VALUES (?, ?, ?, ?, ?)', [funcionarioId, req.session.lojaId, tipo, dt, fotoArquivo])
+    res.json({ id: r.lastID || r.lastInsertRowid, dt, fotoArquivo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-// --- Fotos ---
 app.get('/api/fotos', auth, async (req, res) => {
   try {
     const { funcId } = req.query
-    let sql = `SELECT r.id, r.dt, r.tipo, r.foto_arquivo, f.nome as funcNome
-               FROM registros r JOIN funcionarios f ON f.id = r.funcionario_id
-               WHERE r.loja_id = ? AND r.foto_arquivo IS NOT NULL`
+    let sql = `SELECT r.id, r.dt, r.tipo, r.foto_arquivo, f.nome as funcNome FROM registros r JOIN funcionarios f ON f.id = r.funcionario_id WHERE r.loja_id = ? AND r.foto_arquivo IS NOT NULL`
     const params = [req.session.lojaId]
     if (funcId) { sql += ' AND r.funcionario_id = ?'; params.push(funcId) }
     sql += ' ORDER BY r.dt DESC LIMIT 200'
@@ -235,16 +175,12 @@ app.delete('/api/fotos/antigas', auth, async (req, res) => {
     const limite = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString()
     const antigas = await dbAll('SELECT foto_arquivo FROM registros WHERE loja_id = ? AND foto_arquivo IS NOT NULL AND dt < ?', [req.session.lojaId, limite])
     let removidas = 0
-    for (const r of antigas) {
-      const fp = path.join(FOTOS_DIR, r.foto_arquivo)
-      if (fs.existsSync(fp)) { fs.unlinkSync(fp); removidas++ }
-    }
+    for (const r of antigas) { const fp = path.join(FOTOS_DIR, r.foto_arquivo); if (fs.existsSync(fp)) { fs.unlinkSync(fp); removidas++ } }
     await dbRun('UPDATE registros SET foto_arquivo = NULL WHERE loja_id = ? AND foto_arquivo IS NOT NULL AND dt < ?', [req.session.lojaId, limite])
     res.json({ removidas })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-// --- Config ---
 app.get('/api/config', auth, async (req, res) => {
   const cfg = await dbGet('SELECT * FROM config WHERE loja_id = ?', [req.session.lojaId])
   res.json(cfg || { horas_diarias: 8, tolerancia_min: 10, dias_fotos: 30 })
@@ -253,9 +189,7 @@ app.get('/api/config', auth, async (req, res) => {
 app.put('/api/config', auth, async (req, res) => {
   try {
     const { horas_diarias, tolerancia_min, dias_fotos } = req.body
-    await dbRun(`INSERT INTO config (loja_id, horas_diarias, tolerancia_min, dias_fotos) VALUES (?,?,?,?)
-      ON CONFLICT(loja_id) DO UPDATE SET horas_diarias=excluded.horas_diarias, tolerancia_min=excluded.tolerancia_min, dias_fotos=excluded.dias_fotos`,
-      [req.session.lojaId, horas_diarias, tolerancia_min, dias_fotos])
+    await dbRun(`INSERT INTO config (loja_id, horas_diarias, tolerancia_min, dias_fotos) VALUES (?,?,?,?) ON CONFLICT(loja_id) DO UPDATE SET horas_diarias=excluded.horas_diarias, tolerancia_min=excluded.tolerancia_min, dias_fotos=excluded.dias_fotos`, [req.session.lojaId, horas_diarias, tolerancia_min, dias_fotos])
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -269,37 +203,22 @@ app.put('/api/senha', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-// --- Relatório ---
 app.get('/api/relatorio', auth, async (req, res) => {
   try {
     const funcs = await dbAll('SELECT * FROM funcionarios WHERE loja_id = ? AND ativo = 1', [req.session.lojaId])
     const cfg = await dbGet('SELECT * FROM config WHERE loja_id = ?', [req.session.lojaId]) || { horas_diarias: 8, tolerancia_min: 10 }
     const result = []
     for (const f of funcs) {
-      const regs = await dbAll(
-        `SELECT tipo, dt FROM registros WHERE funcionario_id = ? ORDER BY dt ASC`, [f.id]
-      )
-      // Agrupar por dia
+      const regs = await dbAll(`SELECT tipo, dt FROM registros WHERE funcionario_id = ? ORDER BY dt ASC`, [f.id])
       const porDia = {}
-      regs.forEach(r => {
-        const dia = r.dt.slice(0, 10)
-        if (!porDia[dia]) porDia[dia] = {}
-        porDia[dia][r.tipo] = r.dt
-      })
-      // Calcular minutos só onde há entrada E saída
-      let minTrab = 0
-      let entradas = 0
+      regs.forEach(r => { const dia = r.dt.slice(0,10); if (!porDia[dia]) porDia[dia] = {}; porDia[dia][r.tipo] = r.dt })
+      let minTrab = 0, entradas = 0
       Object.values(porDia).forEach(d => {
         if (d.entrada) entradas++
         if (d.entrada && d.saida) {
-          const ini = new Date(d.entrada)
-          const fim = new Date(d.saida)
-          // Descontar pausa se houver
           let pausaMins = 0
-          if (d.pausa && d.volta) {
-            pausaMins = (new Date(d.volta) - new Date(d.pausa)) / 60000
-          }
-          minTrab += Math.max(0, (fim - ini) / 60000 - pausaMins)
+          if (d.pausa && d.volta) pausaMins = (new Date(d.volta) - new Date(d.pausa)) / 60000
+          minTrab += Math.max(0, (new Date(d.saida) - new Date(d.entrada)) / 60000 - pausaMins)
         }
       })
       const extra = Math.max(0, minTrab - cfg.horas_diarias * 60 * entradas)
@@ -310,29 +229,8 @@ app.get('/api/relatorio', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-// --- Limpeza automática diária ---
-async function limparFotos() {
-  const lojas = await dbAll('SELECT l.id, COALESCE(c.dias_fotos, 30) as dias FROM lojas l LEFT JOIN config c ON c.loja_id = l.id')
-  for (const loja of lojas) {
-    const limite = new Date(Date.now() - loja.dias * 24 * 60 * 60 * 1000).toISOString()
-    const antigas = await dbAll('SELECT foto_arquivo FROM registros WHERE loja_id = ? AND foto_arquivo IS NOT NULL AND dt < ?', [loja.id, limite])
-    for (const r of antigas) {
-      const fp = path.join(FOTOS_DIR, r.foto_arquivo)
-      if (fs.existsSync(fp)) fs.unlinkSync(fp)
-    }
-    if (antigas.length > 0) {
-      await dbRun('UPDATE registros SET foto_arquivo = NULL WHERE loja_id = ? AND foto_arquivo IS NOT NULL AND dt < ?', [loja.id, limite])
-      console.log(`[Limpeza] Loja ${loja.id}: ${antigas.length} foto(s) removida(s)`)
-    }
-  }
-}
-setInterval(limparFotos, 24 * 60 * 60 * 1000)
-
-// --- Iniciar ---
 initDB().then(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
-    console.log(`   Acesso na rede: http://SEU_IP:${PORT}`)
-    console.log(`   Pressione Ctrl+C para encerrar\n`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
