@@ -572,10 +572,10 @@ async function renderApuracao() {
       })
       minsTrabalhados = Math.round(minsTrabalhados)
       const minsEsperados = diasUteis * CONFIG.horas_diarias * 60
-      const minsExtras = Math.max(0, minsTrabalhados - minsEsperados)
+      const saldoMins = minsTrabalhados - minsEsperados; const minsExtras = Math.max(0, saldoMins)
       const faltas = Math.max(0, diasUteis - diasTrabalhados)
 
-      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, faltas, porDia }
+      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, saldoMins, faltas, porDia }
     })
 
     // Métricas totais
@@ -944,4 +944,7 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
+
+
+
 
