@@ -708,9 +708,10 @@ async function renomearLoja() {
     el('novo-nome-loja').value = ''
     el('loja-ok').style.display = 'flex'
     setTimeout(() => el('loja-ok').style.display = 'none', 2500)
-    // Recarregar lista de lojas
+    // Recarregar lista de lojas no login e na tabela
     const lojas = await api('GET', '/lojas')
     const ll = el('ll'); if(ll){ ll.innerHTML='<option value="">— Selecione a loja —</option>'; lojas.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;ll.appendChild(o)}) }
+    if (SESSION.role === 'master') renderTodasLojas()
   } catch (e) { alert('Erro: ' + e.message) }
 }
 
