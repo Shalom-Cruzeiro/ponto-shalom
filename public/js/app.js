@@ -356,7 +356,7 @@ async function renderRel() {
     rm.innerHTML = `
       <div class="metric"><div class="ml">Funcionários</div><div class="mv">${funcs.length}</div></div>
       <div class="metric"><div class="ml">Total entradas</div><div class="mv">${totalE}</div></div>
-      <div class="metric"><div class="ml">Horas Saldo</div><div class="mv" style="color:${totalExtra > 0 ? 'var(--red)' : 'var(--green)'}">${totalExtra > 0 ? '+' : ''}${fmtH(totalExtra)}</div></div>
+      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtra > 0 ? 'var(--red)' : 'var(--green)'}">${totalExtra > 0 ? '+' : ''}${fmtH(totalExtra)}</div></div>
       <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve > 0 ? 'var(--warn)' : 'var(--green)'}">${totalDeve > 0 ? '-' : ''}${fmtH(totalDeve)}</div></div>
       <div class="metric"><div class="ml">Fotos salvas</div><div class="mv">${totalF}</div></div>`
     const statusBadge = (f) => {
@@ -388,7 +388,7 @@ async function exportCSV() {
   try {
     const { funcionarios: funcs, config: cfg } = await api('GET', '/relatorio')
     const regs = await api('GET', '/registros?limite=2000')
-    let csv = 'Funcionário,Cargo,Entradas,Horas Trab.,Horas Saldo,Fotos,Status\n'
+    let csv = 'Funcionário,Cargo,Entradas,Horas Trab.,Horas Extras,Fotos,Status\n'
     funcs.forEach(f => { csv += `"${f.nome}","${f.cargo}",${f.entradas},"${fmtH(f.minTrab)}","${fmtH(f.extra)}",${f.fotos},"${f.status}"\n` })
     csv += '\nHistórico\nData/Hora,Funcionário,Evento,Com foto\n'
     const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
@@ -572,16 +572,16 @@ async function renderApuracao() {
       })
       minsTrabalhados = Math.round(minsTrabalhados)
       const minsEsperados = diasUteis * CONFIG.horas_diarias * 60
-      const minsSaldo = Math.max(0, minsTrabalhados - minsEsperados)
+      const minsExtras = Math.max(0, minsTrabalhados - minsEsperados)
       const faltas = Math.max(0, diasUteis - diasTrabalhados)
 
-      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsSaldo, faltas, porDia }
+      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, faltas, porDia }
     })
 
     // Métricas totais
     const totalDias = rows.reduce((s, r) => s + r.diasTrabalhados, 0)
     const totalMins = rows.reduce((s, r) => s + r.minsTrabalhados, 0)
-    const totalSaldo = rows.reduce((s, r) => s + r.minsSaldo, 0)
+    const totalExtras = rows.reduce((s, r) => s + r.minsExtras, 0)
     const totalFaltas = rows.reduce((s, r) => s + r.faltas, 0)
     const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
 
@@ -591,21 +591,21 @@ async function renderApuracao() {
       <div class="metric"><div class="ml">Mês</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
       <div class="metric"><div class="ml">Dias úteis</div><div class="mv">${diasUteis}</div></div>
       <div class="metric"><div class="ml">Total horas trab.</div><div class="mv">${fmtH(totalMins)}</div></div>
-      <div class="metric"><div class="ml">Horas Saldo</div><div class="mv" style="color:${totalSaldo>0?'var(--red)':'var(--green)'}">${fmtH(totalSaldo)}</div></div>
+      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${fmtH(totalExtras)}</div></div>
       <div class="metric"><div class="ml">Faltas</div><div class="mv" style="color:${totalFaltas>0?'var(--red)':'var(--green)'}">${totalFaltas}</div></div>`
 
     const ab = el('apur-body')
     ab.innerHTML = rows.map(r => {
       const pct = Math.min(100, r.minsEsperados > 0 ? Math.round((r.minsTrabalhados / r.minsEsperados) * 100) : 0)
       const badge = r.faltas > 3 ? `<span class="badge bd">${r.faltas} faltas</span>` :
-                    r.minsSaldo > 0 ? `<span class="badge bw">+${fmtH(r.minsSaldo)} extra</span>` :
+                    r.minsExtras > 0 ? `<span class="badge bw">+${fmtH(r.minsExtras)} extra</span>` :
                     r.diasTrabalhados > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem registros</span>'
       return `<tr style="cursor:pointer;" onclick="verDetalhe(${JSON.stringify(r.func).replace(/"/g,'&quot;')}, ${JSON.stringify(r.porDia).replace(/"/g,'&quot;')}, '${nomeMes} ${ano}')">
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.func.nome)}</div>${r.func.nome}</div></td>
         <td>${r.diasTrabalhados} / ${r.diasUteis}</td>
         <td>${fmtH(r.minsTrabalhados)}</td>
         <td>${fmtH(r.minsEsperados)}</td>
-        <td style="color:${r.minsSaldo>0?'var(--red)':'var(--muted)'}">${r.minsSaldo > 0 ? '+'+fmtH(r.minsSaldo) : '—'}</td>
+        <td style="color:${r.minsExtras>0?'var(--red)':'var(--muted)'}">${r.minsExtras > 0 ? '+'+fmtH(r.minsExtras) : '—'}</td>
         <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : '—'}</td>
         <td>${badge}</td>
       </tr>`
@@ -673,7 +673,7 @@ async function exportApuracaoCSV() {
 
   let csv = `Apuração de Horas — ${nomeMes} ${ano} — ${SESSION.lojaNome}\n`
   csv += `Dias úteis no mês: ${diasUteis}\n\n`
-  csv += `Funcionário,Cargo,Dias Trabalhados,Dias Úteis,Horas Trabalhadas,Horas Esperadas,Horas Saldo,Faltas,Status\n`
+  csv += `Funcionário,Cargo,Dias Trabalhados,Dias Úteis,Horas Trabalhadas,Horas Esperadas,Horas Extras,Faltas,Status\n`
 
   for (const func of FUNCS) {
     const regsFunc = regsDoMes.filter(r => r.funcNome === func.nome)
@@ -688,10 +688,10 @@ async function exportApuracaoCSV() {
     Object.values(porDia).forEach(d => { minsTrab += calcMins(d) })
     minsTrab = Math.round(minsTrab)
     const minsEsp = diasUteis * CONFIG.horas_diarias * 60
-    const Saldo = Math.max(0, minsTrab - minsEsp)
+    const extras = Math.max(0, minsTrab - minsEsp)
     const faltas = Math.max(0, diasUteis - diasTrab)
-    const status = faltas > 3 ? 'Muitas faltas' : Saldo > 0 ? 'Hora extra' : diasTrab > 0 ? 'Regular' : 'Sem registros'
-    csv += `"${func.nome}","${func.cargo}",${diasTrab},${diasUteis},"${fmtH(minsTrab)}","${fmtH(minsEsp)}","${fmtH(Saldo)}",${faltas},"${status}"\n`
+    const status = faltas > 3 ? 'Muitas faltas' : extras > 0 ? 'Hora extra' : diasTrab > 0 ? 'Regular' : 'Sem registros'
+    csv += `"${func.nome}","${func.cargo}",${diasTrab},${diasUteis},"${fmtH(minsTrab)}","${fmtH(minsEsp)}","${fmtH(extras)}",${faltas},"${status}"\n`
   }
 
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -787,17 +787,22 @@ function gerarPDF() {
   doc.text(`Dias úteis no mês: ${diasUteis}   |   Jornada diária: ${CONFIG.horas_diarias}h   |   Tolerância: ${CONFIG.tolerancia_min} min`, margem, y)
   y += 8
 
-  // Tabela resumo
-  const tableData = rows.map(r => [
-    r.func.nome,
-    r.func.cargo || '—',
-    `${r.diasTrabalhados} / ${r.diasUteis}`,
-    fmtH(r.minsTrabalhados),
-    fmtH(r.minsEsperados),
-    r.minsSaldo > 0 ? '+' + fmtH(r.minsSaldo) : '—',
-    r.faltas > 0 ? String(r.faltas) : '—',
-    r.faltas > 3 ? 'Muitas faltas' : r.minsSaldo > 0 ? 'Hora extra' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
-  ])
+  // Tabela resumo com saldo de horas
+  const tableData = rows.map(r => {
+    const saldo = r.minsTrabalhados - r.minsEsperados
+    const saldoTexto = saldo > 0 ? '+' + fmtH(saldo) : saldo < 0 ? '-' + fmtH(Math.abs(saldo)) : '0h'
+    const status = r.faltas > 3 ? 'Muitas faltas' : saldo > CONFIG.tolerancia_min ? 'Hora extra' : saldo < -CONFIG.tolerancia_min ? 'A compensar' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
+    return [
+      r.func.nome,
+      r.func.cargo || '—',
+      `${r.diasTrabalhados} / ${r.diasUteis}`,
+      fmtH(r.minsTrabalhados),
+      fmtH(r.minsEsperados),
+      saldoTexto,
+      r.faltas > 0 ? String(r.faltas) : '—',
+      status
+    ]
+  })
 
   doc.autoTable({
     startY: y,
@@ -810,18 +815,33 @@ function gerarPDF() {
     columnStyles: {
       0: { cellWidth: 42 }, 1: { cellWidth: 28 }, 2: { cellWidth: 18, halign: 'center' },
       3: { cellWidth: 22, halign: 'center' }, 4: { cellWidth: 22, halign: 'center' },
-      5: { cellWidth: 18, halign: 'center', textColor: [163, 45, 45] },
-      6: { cellWidth: 14, halign: 'center', textColor: [163, 45, 45] },
+      5: { cellWidth: 18, halign: 'center' },
+      6: { cellWidth: 14, halign: 'center' },
       7: { cellWidth: 22, halign: 'center' }
     },
     didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 7) {
-        const v = data.cell.raw
-        if (v === 'Regular') data.cell.styles.textColor = [59, 109, 17]
-        else if (v === 'Hora extra' || v === 'Muitas faltas') data.cell.styles.textColor = [163, 45, 45]
+      if (data.section === 'body') {
+        if (data.column.index === 5) {
+          const v = data.cell.raw
+          if (v && v.startsWith('+')) data.cell.styles.textColor = [163, 45, 45]
+          else if (v && v.startsWith('-')) data.cell.styles.textColor = [133, 79, 11]
+        }
+        if (data.column.index === 7) {
+          const v = data.cell.raw
+          if (v === 'Regular') data.cell.styles.textColor = [59, 109, 17]
+          else if (v === 'Hora extra' || v === 'Muitas faltas') data.cell.styles.textColor = [163, 45, 45]
+          else if (v === 'A compensar') data.cell.styles.textColor = [133, 79, 11]
+        }
       }
     }
   })
+
+  // Totais no rodapé da tabela
+  const totalExtra = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo > 0 ? saldo : 0) }, 0)
+  const totalDeve = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo < 0 ? Math.abs(saldo) : 0) }, 0)
+  const fy = doc.lastAutoTable.finalY + 6
+  doc.setFontSize(9); doc.setTextColor(80, 80, 80)
+  doc.text(`Total horas extras: ${fmtH(totalExtra)}   |   Total a compensar: ${fmtH(totalDeve)}`, margem, fy)
 
   // Rodapé
   const pageH = doc.internal.pageSize.height
@@ -924,5 +944,3 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
-  
-
