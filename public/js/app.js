@@ -414,16 +414,14 @@ async function salvarCfg() {
 async function cadastrarFunc() {
   const nome = el('novo-nome').value.trim(), cargo = el('novo-cargo').value.trim()
   const hora_inicio = el('novo-inicio').value.trim(), hora_fim = el('novo-fim').value.trim()
-  const dias_semana = parseInt(el('novo-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
     alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
-    await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim, dias_semana })
+    await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim })
     el('novo-nome').value = ''; el('novo-cargo').value = ''
     el('novo-inicio').value = ''; el('novo-fim').value = ''
-    el('novo-dias-semana').value = ''
     await loadFuncs()
   } catch (e) { alert('Erro: ' + e.message) }
 }
@@ -447,7 +445,6 @@ function renderFuncBody() {
     <td>${f.hora_inicio && f.hora_fim
       ? `<span class="badge bi"><i class="ti ti-clock"></i> ${f.hora_inicio} — ${f.hora_fim}</span>`
       : '<span class="badge bg">Sem jornada</span>'}</td>
-    <td>${f.dias_semana ? `<span class="badge bg">${f.dias_semana}x/sem</span>` : '<span class="badge bg">5x/sem</span>'}</td>
     <td><span class="badge bk">Ativo</span></td>
     <td><button class="btn btn-sm btn-i" onclick='abrirModal(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
       <i class="ti ti-pencil"></i> Editar
@@ -465,7 +462,6 @@ function abrirModal(func) {
   el('edit-cargo').value = func.cargo || ''
   el('edit-inicio').value = func.hora_inicio || ''
   el('edit-fim').value = func.hora_fim || ''
-  el('edit-dias-semana').value = func.dias_semana || 5
   el('edit-ok').style.display = 'none'
   const modal = el('modal-jornada')
   modal.style.display = 'flex'
@@ -481,13 +477,12 @@ async function salvarJornada() {
   const cargo = el('edit-cargo').value.trim()
   const hora_inicio = el('edit-inicio').value.trim()
   const hora_fim = el('edit-fim').value.trim()
-  const dias_semana = parseInt(el('edit-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
     alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
-    await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim, dias_semana })
+    await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim })
     el('edit-ok').style.display = 'flex'
     setTimeout(() => fecharModal(), 1200)
     await loadFuncs()
@@ -504,7 +499,6 @@ function switchTab(name, btn) {
   if (name === 'fotos') renderFotos()
   if (name === 'cfg') { renderFuncBody(); if (SESSION.role === 'master') renderTodasLojas() }
   if (name === 'apuracao') initApuracao()
-  if (name === 'escala') initEscala()
 }
 
 function setStepDots(active) {
@@ -577,37 +571,17 @@ async function renderApuracao() {
         minsTrabalhados += calcMins(d)
       })
       minsTrabalhados = Math.round(minsTrabalhados)
-      // Calcular jornada esperada pela escala cadastrada
-      let minsEsperados = 0
-      let diasEsperados = 0
-      try {
-        const escalaTotal = await api('GET', `/escala/total?funcId=${func.id}&mes=${mes}&ano=${ano}`)
-        if (escalaTotal.totalDias > 0) {
-          minsEsperados = escalaTotal.totalHoras * 60
-          diasEsperados = escalaTotal.totalDias
-        } else {
-          // Fallback: usar dias por semana
-          const dpw = func.dias_semana || 5
-          diasEsperados = Math.round(diasUteis * dpw / 5)
-          minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
-        }
-      } catch(_) {
-        const dpw = func.dias_semana || 5
-        diasEsperados = Math.round(diasUteis * dpw / 5)
-        minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
-      }
-      const saldoMins = minsTrabalhados - minsEsperados
-      const minsExtras = Math.max(0, saldoMins)
-      const faltas = Math.max(0, diasEsperados - diasTrabalhados)
+      const minsEsperados = diasUteis * CONFIG.horas_diarias * 60
+      const minsExtras = Math.max(0, minsTrabalhados - minsEsperados)
+      const faltas = Math.max(0, diasUteis - diasTrabalhados)
 
-      return { func, diasTrabalhados, diasCompletos, diasUteis, diasEsperados, minsTrabalhados, minsEsperados, minsExtras, saldoMins, faltas, porDia }
+      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, faltas, porDia }
     })
 
     // Métricas totais
     const totalDias = rows.reduce((s, r) => s + r.diasTrabalhados, 0)
     const totalMins = rows.reduce((s, r) => s + r.minsTrabalhados, 0)
-    const totalExtras = rows.reduce((s, r) => s + Math.max(0, r.saldoMins), 0)
-    const totalDeve = rows.reduce((s, r) => s + Math.max(0, -r.saldoMins), 0)
+    const totalExtras = rows.reduce((s, r) => s + r.minsExtras, 0)
     const totalFaltas = rows.reduce((s, r) => s + r.faltas, 0)
     const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
 
@@ -617,24 +591,21 @@ async function renderApuracao() {
       <div class="metric"><div class="ml">Mês</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
       <div class="metric"><div class="ml">Dias úteis</div><div class="mv">${diasUteis}</div></div>
       <div class="metric"><div class="ml">Total horas trab.</div><div class="mv">${fmtH(totalMins)}</div></div>
-      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${totalExtras>0?'+':''}${fmtH(totalExtras)}</div></div>
-      <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve>0?'var(--warn)':'var(--green)'}">${totalDeve>0?'-':''}${fmtH(totalDeve)}</div></div>
+      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${fmtH(totalExtras)}</div></div>
       <div class="metric"><div class="ml">Faltas</div><div class="mv" style="color:${totalFaltas>0?'var(--red)':'var(--green)'}">${totalFaltas}</div></div>`
 
     const ab = el('apur-body')
     ab.innerHTML = rows.map(r => {
       const pct = Math.min(100, r.minsEsperados > 0 ? Math.round((r.minsTrabalhados / r.minsEsperados) * 100) : 0)
-      const saldoTxt = r.saldoMins > 0 ? `+${fmtH(r.saldoMins)}` : r.saldoMins < 0 ? `-${fmtH(Math.abs(r.saldoMins))}` : '0h'
-      const corSaldo = r.saldoMins > 0 ? 'var(--red)' : r.saldoMins < 0 ? 'var(--warn)' : 'var(--green)'
-      const badge = r.saldoMins > CONFIG.tolerancia_min*60 ? `<span class="badge bd">+${fmtH(r.saldoMins)} extra</span>` :
-                    r.saldoMins < -CONFIG.tolerancia_min*60 ? `<span class="badge bw">${fmtH(Math.abs(r.saldoMins))} compensar</span>` :
+      const badge = r.faltas > 3 ? `<span class="badge bd">${r.faltas} faltas</span>` :
+                    r.minsExtras > 0 ? `<span class="badge bw">+${fmtH(r.minsExtras)} extra</span>` :
                     r.diasTrabalhados > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem registros</span>'
       return `<tr style="cursor:pointer;" onclick="verDetalhe(${JSON.stringify(r.func).replace(/"/g,'&quot;')}, ${JSON.stringify(r.porDia).replace(/"/g,'&quot;')}, '${nomeMes} ${ano}')">
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.func.nome)}</div>${r.func.nome}</div></td>
-        <td>${r.diasTrabalhados} / ${r.diasEsperados}</td>
+        <td>${r.diasTrabalhados} / ${r.diasUteis}</td>
         <td>${fmtH(r.minsTrabalhados)}</td>
         <td>${fmtH(r.minsEsperados)}</td>
-        <td style="color:${corSaldo};font-weight:500;">${saldoTxt}</td>
+        <td style="color:${r.minsExtras>0?'var(--red)':'var(--muted)'}">${r.minsExtras > 0 ? '+'+fmtH(r.minsExtras) : '—'}</td>
         <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : '—'}</td>
         <td>${badge}</td>
       </tr>`
@@ -781,103 +752,6 @@ async function alterarSenhaLoja(id) {
   } catch (e) { alert('Erro: ' + e.message) }
 }
 
-// --- Escala de trabalho ---
-const DIAS_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
-
-function initEscala() {
-  const anoSel = el('escala-ano')
-  const anoAtual = new Date().getFullYear()
-  anoSel.innerHTML = ''
-  for (let a = anoAtual; a >= anoAtual - 2; a--) {
-    const o = document.createElement('option'); o.value = a; o.textContent = a; anoSel.appendChild(o)
-  }
-  el('escala-mes').value = new Date().getMonth() + 1
-
-  const ef = el('escala-func')
-  ef.innerHTML = '<option value="">— Selecione o funcionário —</option>'
-  FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; ef.appendChild(o) })
-}
-
-async function renderEscala() {
-  const funcId = el('escala-func').value
-  const mes = parseInt(el('escala-mes').value)
-  const ano = parseInt(el('escala-ano').value)
-  const cal = el('escala-cal')
-
-  if (!funcId) { cal.innerHTML = '<div style="color:var(--muted);padding:20px;">Selecione um funcionário.</div>'; el('escala-total').textContent = ''; return }
-
-  // Carregar escala salva
-  const diasSalvos = await api('GET', `/escala?funcId=${funcId}&mes=${mes}&ano=${ano}`)
-  const escalaMapa = {}
-  diasSalvos.forEach(d => { escalaMapa[d.data] = { tipo: d.tipo, horas: d.horas } })
-
-  // Montar calendário
-  const primeiroDia = new Date(ano, mes - 1, 1)
-  const ultimoDia = new Date(ano, mes, 0).getDate()
-  const diaSemanaInicio = primeiroDia.getDay() // 0=dom
-
-  let totalHoras = 0
-  let totalDias = 0
-
-  // Cabeçalhos
-  let html = DIAS_SEMANA_LABEL.map(d => `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--muted);padding:4px 0;">${d}</div>`).join('')
-
-  // Células vazias antes do dia 1
-  for (let i = 0; i < diaSemanaInicio; i++) {
-    html += '<div></div>'
-  }
-
-  // Dias do mês
-  for (let dia = 1; dia <= ultimoDia; dia++) {
-    const data = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
-    const diaSemana = new Date(ano, mes - 1, dia).getDay()
-    const isDom = diaSemana === 0
-    const salvo = escalaMapa[data]
-
-    // Tipo padrão: domingo=dom, outros=trabalha
-    let tipo = salvo ? salvo.tipo : (isDom ? 'dom' : 'trabalha')
-    let horas = salvo ? salvo.horas : (isDom ? 6 : 8)
-    if (tipo === 'folga') horas = 0
-
-    if (tipo !== 'folga') { totalHoras += horas; totalDias++ }
-
-    const cores = {
-      trabalha: 'background:#EAF3DE;border:1.5px solid #3B6D11;color:#27500A;',
-      dom: 'background:#E6F1FB;border:1.5px solid #185FA5;color:#0C447C;',
-      feriado: 'background:#FCEBEB;border:1.5px solid #A32D2D;color:#791F1F;',
-      folga: 'background:var(--bg2);border:1.5px solid var(--border2);color:var(--muted);'
-    }
-    const horasLabel = horas > 0 ? `${horas}h` : '—'
-
-    html += `<div onclick="toggleEscala('${funcId}','${data}','${tipo}',${horas},${isDom?1:0})"
-      style="cursor:pointer;border-radius:8px;padding:6px 4px;text-align:center;user-select:none;${cores[tipo]}transition:opacity .15s;"
-      onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'">
-      <div style="font-size:13px;font-weight:600;">${dia}</div>
-      <div style="font-size:10px;">${DIAS_SEMANA_LABEL[diaSemana]}</div>
-      <div style="font-size:11px;font-weight:500;">${horasLabel}</div>
-    </div>`
-  }
-
-  cal.innerHTML = html
-  el('escala-total').textContent = `Total previsto: ${totalDias} dias · ${fmtH(totalHoras * 60)}`
-}
-
-async function toggleEscala(funcId, data, tipoAtual, horasAtual, isDom) {
-  // Ciclo: trabalha → feriado → folga → trabalha (dom: dom → feriado → folga → dom)
-  let novoTipo, novasHoras
-  if (isDom) {
-    if (tipoAtual === 'dom') { novoTipo = 'feriado'; novasHoras = 0 }
-    else if (tipoAtual === 'feriado') { novoTipo = 'folga'; novasHoras = 0 }
-    else { novoTipo = 'dom'; novasHoras = 6 }
-  } else {
-    if (tipoAtual === 'trabalha') { novoTipo = 'feriado'; novasHoras = 0 }
-    else if (tipoAtual === 'feriado') { novoTipo = 'folga'; novasHoras = 0 }
-    else { novoTipo = 'trabalha'; novasHoras = 8 }
-  }
-  await api('PUT', '/escala', { funcionarioId: funcId, data, tipo: novoTipo, horas: novasHoras })
-  renderEscala()
-}
-
 // Iniciar
 initLogin()
 
@@ -913,26 +787,21 @@ function gerarPDF() {
   doc.text(`Dias úteis no mês: ${diasUteis}   |   Jornada diária: ${CONFIG.horas_diarias}h   |   Tolerância: ${CONFIG.tolerancia_min} min`, margem, y)
   y += 8
 
-  // Tabela resumo com saldo de horas
-  const tableData = rows.map(r => {
-    const saldo = r.minsTrabalhados - r.minsEsperados
-    const saldoTexto = saldo > 0 ? '+' + fmtH(saldo) : saldo < 0 ? '-' + fmtH(Math.abs(saldo)) : '0h'
-    const status = r.faltas > 3 ? 'Muitas faltas' : saldo > CONFIG.tolerancia_min ? 'Hora extra' : saldo < -CONFIG.tolerancia_min ? 'A compensar' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
-    return [
-      r.func.nome,
-      r.func.cargo || '—',
-      `${r.diasTrabalhados} / ${r.diasUteis}`,
-      fmtH(r.minsTrabalhados),
-      fmtH(r.minsEsperados),
-      saldoTexto,
-      r.faltas > 0 ? String(r.faltas) : '—',
-      status
-    ]
-  })
+  // Tabela resumo
+  const tableData = rows.map(r => [
+    r.func.nome,
+    r.func.cargo || '—',
+    `${r.diasTrabalhados} / ${r.diasUteis}`,
+    fmtH(r.minsTrabalhados),
+    fmtH(r.minsEsperados),
+    r.minsExtras > 0 ? '+' + fmtH(r.minsExtras) : '—',
+    r.faltas > 0 ? String(r.faltas) : '—',
+    r.faltas > 3 ? 'Muitas faltas' : r.minsExtras > 0 ? 'Hora extra' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
+  ])
 
   doc.autoTable({
     startY: y,
-    head: [['Funcionário', 'Cargo', 'Dias', 'Horas trab.', 'Esperado', 'Saldo', 'Faltas', 'Status']],
+    head: [['Funcionário', 'Cargo', 'Dias', 'Horas trab.', 'Esperado', 'Extras', 'Faltas', 'Status']],
     body: tableData,
     theme: 'grid',
     headStyles: { fillColor: [24, 95, 165], textColor: 255, fontStyle: 'bold', fontSize: 9 },
@@ -941,33 +810,18 @@ function gerarPDF() {
     columnStyles: {
       0: { cellWidth: 42 }, 1: { cellWidth: 28 }, 2: { cellWidth: 18, halign: 'center' },
       3: { cellWidth: 22, halign: 'center' }, 4: { cellWidth: 22, halign: 'center' },
-      5: { cellWidth: 18, halign: 'center' },
-      6: { cellWidth: 14, halign: 'center' },
+      5: { cellWidth: 18, halign: 'center', textColor: [163, 45, 45] },
+      6: { cellWidth: 14, halign: 'center', textColor: [163, 45, 45] },
       7: { cellWidth: 22, halign: 'center' }
     },
     didParseCell: (data) => {
-      if (data.section === 'body') {
-        if (data.column.index === 5) {
-          const v = data.cell.raw
-          if (v && v.startsWith('+')) data.cell.styles.textColor = [163, 45, 45]
-          else if (v && v.startsWith('-')) data.cell.styles.textColor = [133, 79, 11]
-        }
-        if (data.column.index === 7) {
-          const v = data.cell.raw
-          if (v === 'Regular') data.cell.styles.textColor = [59, 109, 17]
-          else if (v === 'Hora extra' || v === 'Muitas faltas') data.cell.styles.textColor = [163, 45, 45]
-          else if (v === 'A compensar') data.cell.styles.textColor = [133, 79, 11]
-        }
+      if (data.section === 'body' && data.column.index === 7) {
+        const v = data.cell.raw
+        if (v === 'Regular') data.cell.styles.textColor = [59, 109, 17]
+        else if (v === 'Hora extra' || v === 'Muitas faltas') data.cell.styles.textColor = [163, 45, 45]
       }
     }
   })
-
-  // Totais no rodapé da tabela
-  const totalExtra = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo > 0 ? saldo : 0) }, 0)
-  const totalDeve = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo < 0 ? Math.abs(saldo) : 0) }, 0)
-  const fy = doc.lastAutoTable.finalY + 6
-  doc.setFontSize(9); doc.setTextColor(80, 80, 80)
-  doc.text(`Total horas extras: ${fmtH(totalExtra)}   |   Total a compensar: ${fmtH(totalDeve)}`, margem, fy)
 
   // Rodapé
   const pageH = doc.internal.pageSize.height
@@ -1070,3 +924,4 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
+  
