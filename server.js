@@ -35,10 +35,10 @@ try {
 async function initDB() {
   await dbRun(`CREATE TABLE IF NOT EXISTS lojas (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE NOT NULL, senha TEXT NOT NULL DEFAULT '1234')`)
   await dbRun(`CREATE TABLE IF NOT EXISTS config (loja_id INTEGER PRIMARY KEY, horas_diarias INTEGER DEFAULT 8, tolerancia_min INTEGER DEFAULT 10, dias_fotos INTEGER DEFAULT 30)`)
-  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT)`)
+  await dbRun(`CREATE TABLE IF NOT EXISTS funcionarios (id INTEGER PRIMARY KEY AUTOINCREMENT, loja_id INTEGER NOT NULL, nome TEXT NOT NULL, cargo TEXT DEFAULT 'Funcionário', ativo INTEGER DEFAULT 1, hora_inicio TEXT, hora_fim TEXT, dias_semana INTEGER DEFAULT 5)`)
   await dbRun(`CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT, funcionario_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, tipo TEXT NOT NULL, dt TEXT NOT NULL, foto_arquivo TEXT)`)
   try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT`) } catch(_) {}
-  try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {}
+  try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT`) } catch(_) {} try { await dbRun(`ALTER TABLE funcionarios ADD COLUMN dias_semana INTEGER DEFAULT 5`) } catch(_) {}
 
   const lojas = [
     'Loja do Cruzeiro - Estação',
@@ -106,7 +106,7 @@ app.post('/api/funcionarios', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
     if (!nome) return res.status(400).json({ erro: 'Nome obrigatório' })
-    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim) VALUES (?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null])
+    const r = await dbRun('INSERT INTO funcionarios (loja_id, nome, cargo, hora_inicio, hora_fim, dias_semana) VALUES (?, ?, ?, ?, ?, ?)', [req.session.lojaId, nome, cargo || 'Funcionário', hora_inicio || null, hora_fim || null, parseInt(dias_semana) || 5])
     res.json({ id: r.lastID || r.lastInsertRowid, nome, cargo })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -114,7 +114,7 @@ app.post('/api/funcionarios', auth, async (req, res) => {
 app.put('/api/funcionarios/:id', auth, async (req, res) => {
   try {
     const { nome, cargo, hora_inicio, hora_fim } = req.body
-    await dbRun('UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=? WHERE id=? AND loja_id=?', [nome, cargo, hora_inicio || null, hora_fim || null, req.params.id, req.session.lojaId])
+    await dbRun('UPDATE funcionarios SET nome=?, cargo=?, hora_inicio=?, hora_fim=?, dias_semana=? WHERE id=? AND loja_id=?', [nome, cargo, hora_inicio || null, hora_fim || null, parseInt(dias_semana) || 5, req.params.id, req.session.lojaId])
     res.json({ ok: true })
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
@@ -281,6 +281,15 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
+
+
+
+
+
+
+
+
 
 
 

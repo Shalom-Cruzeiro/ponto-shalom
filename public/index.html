@@ -188,7 +188,7 @@
       <div id="apur-metrics" class="metrics-grid" style="margin-bottom:1rem;"></div>
       <div class="card">
         <div class="table-wrap">
-          <table><thead><tr><th>Funcionário</th><th>Dias trab.</th><th>Horas trab.</th><th>Esperado</th><th>Extras</th><th>Faltas</th><th>Status</th></tr></thead>
+          <table><thead><tr><th>Funcionário</th><th>Dias trab.</th><th>Horas trab.</th><th>Esperado</th><th>Saldo</th><th>Faltas</th><th>Status</th></tr></thead>
           <tbody id="apur-body"></tbody></table>
         </div>
       </div>
@@ -231,6 +231,10 @@
             <label class="field-label">Fim da jornada</label>
             <input type="text" id="novo-fim" placeholder="Ex: 22:00" style="margin-bottom:0;"/>
           </div>
+        </div>
+        <div style="margin-top:10px;">
+          <label class="field-label">Dias trabalhados por semana</label>
+          <input type="number" id="novo-dias-semana" placeholder="Ex: 5" min="1" max="7" style="max-width:120px;margin-bottom:0;"/>
         </div>
         <button class="btn btn-p" onclick="cadastrarFunc()" style="margin-top:12px;"><i class="ti ti-user-plus"></i> Cadastrar</button>
       </div>
@@ -290,6 +294,10 @@
         <label class="field-label">Fim da jornada</label>
         <input type="text" id="edit-fim" placeholder="Ex: 22:00" style="margin-bottom:0;"/>
       </div>
+    </div>
+    <div style="margin-top:10px;">
+      <label class="field-label">Dias trabalhados por semana</label>
+      <input type="number" id="edit-dias-semana" placeholder="Ex: 5" min="1" max="7" style="max-width:120px;margin-bottom:0;"/>
     </div>
     <div style="font-size:12px;color:var(--muted);margin:10px 0 14px;">
       <i class="ti ti-info-circle" style="font-size:14px;vertical-align:middle;"></i>

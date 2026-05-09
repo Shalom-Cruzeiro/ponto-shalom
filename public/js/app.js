@@ -327,7 +327,7 @@ async function renderFotos() {
     const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
     grid.innerHTML = fotos.map(f => `
       <div class="foto-card">
-        <a href=/fotos/${f.foto_arquivo} target=_blank><img src=/fotos/${f.foto_arquivo}" alt="Foto de ${f.funcNome}"/>
+        <img src="/fotos/${f.foto_arquivo}?t=${TOKEN}" alt="Foto de ${f.funcNome}"/>
         <div style="font-size:12px;font-weight:500;margin-bottom:3px;">${f.funcNome}</div>
         <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${fmtDT(f.dt)}</div>
         <span class="badge ${BC[f.tipo]}">${L[f.tipo]}</span>
@@ -361,15 +361,15 @@ async function renderRel() {
       <div class="metric"><div class="ml">Fotos salvas</div><div class="mv">${totalF}</div></div>`
     const statusBadge = (f) => {
       if (!f.saldo && f.saldo !== 0) return f.entradas > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem ponto</span>'
-      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(Math.abs(f.saldo))} extra</span>`
-      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(Math.abs(f.saldo))} a compensar</span>`
+      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(f.saldo)} extra</span>`
+      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(f.saldo)} a compensar</span>`
       if (f.entradas > 0) return '<span class="badge bk">Regular</span>'
       return '<span class="badge bg">Sem ponto</span>'
     }
     rb.innerHTML = funcs.map(f => {
       const pct = Math.min(100, f.jornadaEsperada > 0 ? Math.round((f.minTrab / f.jornadaEsperada) * 100) : 0)
       const corBarra = f.saldo > cfg.tolerancia_min ? '#E24B4A' : f.saldo < -cfg.tolerancia_min ? '#BA7517' : '#185FA5'
-      const saldoTexto = f.saldo > 0 ? `+${fmtH(Math.abs(f.saldo))}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
+      const saldoTexto = f.saldo > 0 ? `+${fmtH(f.saldo)}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
       const corSaldo = f.saldo > cfg.tolerancia_min ? 'var(--red)' : f.saldo < -cfg.tolerancia_min ? 'var(--warn)' : 'var(--green)'
       return `<tr>
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
@@ -414,14 +414,16 @@ async function salvarCfg() {
 async function cadastrarFunc() {
   const nome = el('novo-nome').value.trim(), cargo = el('novo-cargo').value.trim()
   const hora_inicio = el('novo-inicio').value.trim(), hora_fim = el('novo-fim').value.trim()
+  const dias_semana = parseInt(el('novo-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
     alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
-    await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim })
+    await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim, dias_semana })
     el('novo-nome').value = ''; el('novo-cargo').value = ''
     el('novo-inicio').value = ''; el('novo-fim').value = ''
+    el('novo-dias-semana').value = ''
     await loadFuncs()
   } catch (e) { alert('Erro: ' + e.message) }
 }
@@ -445,6 +447,7 @@ function renderFuncBody() {
     <td>${f.hora_inicio && f.hora_fim
       ? `<span class="badge bi"><i class="ti ti-clock"></i> ${f.hora_inicio} — ${f.hora_fim}</span>`
       : '<span class="badge bg">Sem jornada</span>'}</td>
+    <td>${f.dias_semana ? `<span class="badge bg">${f.dias_semana}x/sem</span>` : '<span class="badge bg">5x/sem</span>'}</td>
     <td><span class="badge bk">Ativo</span></td>
     <td><button class="btn btn-sm btn-i" onclick='abrirModal(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
       <i class="ti ti-pencil"></i> Editar
@@ -462,6 +465,7 @@ function abrirModal(func) {
   el('edit-cargo').value = func.cargo || ''
   el('edit-inicio').value = func.hora_inicio || ''
   el('edit-fim').value = func.hora_fim || ''
+  el('edit-dias-semana').value = func.dias_semana || 5
   el('edit-ok').style.display = 'none'
   const modal = el('modal-jornada')
   modal.style.display = 'flex'
@@ -477,12 +481,13 @@ async function salvarJornada() {
   const cargo = el('edit-cargo').value.trim()
   const hora_inicio = el('edit-inicio').value.trim()
   const hora_fim = el('edit-fim').value.trim()
+  const dias_semana = parseInt(el('edit-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
     alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
-    await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim })
+    await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim, dias_semana })
     el('edit-ok').style.display = 'flex'
     setTimeout(() => fecharModal(), 1200)
     await loadFuncs()
@@ -571,17 +576,22 @@ async function renderApuracao() {
         minsTrabalhados += calcMins(d)
       })
       minsTrabalhados = Math.round(minsTrabalhados)
-      const minsEsperados = diasUteis * CONFIG.horas_diarias * 60
-      const saldoMins = minsTrabalhados - minsEsperados; const minsExtras = Math.max(0, saldoMins)
-      const faltas = Math.max(0, diasUteis - diasTrabalhados)
+      // Jornada esperada baseada nos dias por semana do funcionário
+      const diasPorSemana = func.dias_semana || 5
+      const diasEsperados = Math.round(diasUteis * diasPorSemana / 5)
+      const minsEsperados = diasEsperados * CONFIG.horas_diarias * 60
+      const saldoMins = minsTrabalhados - minsEsperados
+      const minsExtras = Math.max(0, saldoMins)
+      const faltas = Math.max(0, diasEsperados - diasTrabalhados)
 
-      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, saldoMins, faltas, porDia }
+      return { func, diasTrabalhados, diasCompletos, diasUteis, diasEsperados, minsTrabalhados, minsEsperados, minsExtras, saldoMins, faltas, porDia }
     })
 
     // Métricas totais
     const totalDias = rows.reduce((s, r) => s + r.diasTrabalhados, 0)
     const totalMins = rows.reduce((s, r) => s + r.minsTrabalhados, 0)
-    const totalExtras = rows.reduce((s, r) => s + r.minsExtras, 0)
+    const totalExtras = rows.reduce((s, r) => s + Math.max(0, r.saldoMins), 0)
+    const totalDeve = rows.reduce((s, r) => s + Math.max(0, -r.saldoMins), 0)
     const totalFaltas = rows.reduce((s, r) => s + r.faltas, 0)
     const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
 
@@ -591,21 +601,24 @@ async function renderApuracao() {
       <div class="metric"><div class="ml">Mês</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
       <div class="metric"><div class="ml">Dias úteis</div><div class="mv">${diasUteis}</div></div>
       <div class="metric"><div class="ml">Total horas trab.</div><div class="mv">${fmtH(totalMins)}</div></div>
-      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${fmtH(totalExtras)}</div></div>
+      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${totalExtras>0?'+':''}${fmtH(totalExtras)}</div></div>
+      <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve>0?'var(--warn)':'var(--green)'}">${totalDeve>0?'-':''}${fmtH(totalDeve)}</div></div>
       <div class="metric"><div class="ml">Faltas</div><div class="mv" style="color:${totalFaltas>0?'var(--red)':'var(--green)'}">${totalFaltas}</div></div>`
 
     const ab = el('apur-body')
     ab.innerHTML = rows.map(r => {
       const pct = Math.min(100, r.minsEsperados > 0 ? Math.round((r.minsTrabalhados / r.minsEsperados) * 100) : 0)
-      const badge = r.faltas > 3 ? `<span class="badge bd">${r.faltas} faltas</span>` :
-                    r.minsExtras > 0 ? `<span class="badge bw">+${fmtH(r.minsExtras)} extra</span>` :
+      const saldoTxt = r.saldoMins > 0 ? `+${fmtH(r.saldoMins)}` : r.saldoMins < 0 ? `-${fmtH(Math.abs(r.saldoMins))}` : '0h'
+      const corSaldo = r.saldoMins > 0 ? 'var(--red)' : r.saldoMins < 0 ? 'var(--warn)' : 'var(--green)'
+      const badge = r.saldoMins > CONFIG.tolerancia_min*60 ? `<span class="badge bd">+${fmtH(r.saldoMins)} extra</span>` :
+                    r.saldoMins < -CONFIG.tolerancia_min*60 ? `<span class="badge bw">${fmtH(Math.abs(r.saldoMins))} compensar</span>` :
                     r.diasTrabalhados > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem registros</span>'
       return `<tr style="cursor:pointer;" onclick="verDetalhe(${JSON.stringify(r.func).replace(/"/g,'&quot;')}, ${JSON.stringify(r.porDia).replace(/"/g,'&quot;')}, '${nomeMes} ${ano}')">
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.func.nome)}</div>${r.func.nome}</div></td>
-        <td>${r.diasTrabalhados} / ${r.diasUteis}</td>
+        <td>${r.diasTrabalhados} / ${r.diasEsperados}</td>
         <td>${fmtH(r.minsTrabalhados)}</td>
         <td>${fmtH(r.minsEsperados)}</td>
-        <td style="color:${r.minsExtras>0?'var(--red)':'var(--muted)'}">${r.minsExtras > 0 ? '+'+fmtH(r.minsExtras) : '—'}</td>
+        <td style="color:${corSaldo};font-weight:500;">${saldoTxt}</td>
         <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : '—'}</td>
         <td>${badge}</td>
       </tr>`
@@ -924,7 +937,7 @@ function gerarPDFDetalhe() {
   const totalMins = dias.reduce((s, d) => s + calcMins(porDia[d] || {}), 0)
   const fy = doc.lastAutoTable.finalY + 6
   doc.setFontSize(9); doc.setTextColor(80, 80, 80)
-  const jornadaEsp = totalDias * CONFIG.horas_diarias * 60; const saldoMin = Math.round(totalMins) - jornadaEsp; const saldoTxt = saldoMin > 0 ? "+" + fmtH(saldoMin) + " (horas extras)" : saldoMin < 0 ? "-" + fmtH(Math.abs(saldoMin)) + " (a compensar)" : "0h (regular)"; doc.text(`Total dias: ${totalDias} | Horas trab.: ${fmtH(Math.round(totalMins))} | Jornada esperada: ${fmtH(jornadaEsp)} | Saldo: ${saldoTxt}`, margem, fy)
+  doc.text(`Total de dias trabalhados: ${totalDias}   |   Total de horas: ${fmtH(Math.round(totalMins))}`, margem, fy)
 
   // Assinaturas
   const sigY = fy + 20
@@ -944,10 +957,3 @@ function gerarPDFDetalhe() {
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
-
-
-
-
-
-
-
