@@ -179,7 +179,7 @@ app.get('/api/fotos', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ erro: e.message }) }
 })
 
-app.get('/fotos/:arquivo', auth, (req, res) => {
+app.get('/fotos/:arquivo', (req, res) => {
   const filePath = path.join(FOTOS_DIR, path.basename(req.params.arquivo))
   if (!fs.existsSync(filePath)) return res.status(404).send('Não encontrado')
   res.sendFile(filePath)
@@ -281,6 +281,7 @@ initDB().then(() => {
     console.log(`\n✅ Sistema de Ponto rodando em http://localhost:${PORT}`)
   })
 }).catch(e => { console.error('Erro ao iniciar:', e); process.exit(1) })
+
 
 
 
