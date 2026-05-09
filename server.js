@@ -260,12 +260,17 @@ app.get('/api/relatorio', auth, async (req, res) => {
         if (d.entrada && d.saida) {
           let pausaMins = 0
           if (d.pausa && d.volta) pausaMins = (new Date(d.volta) - new Date(d.pausa)) / 60000
-          minTrab += Math.max(0, (new Date(d.saida) - new Date(d.entrada)) / 60000 - pausaMins)
+          minTrab += (new Date(d.saida) - new Date(d.entrada)) / 60000 - pausaMins
         }
       })
-      const extra = Math.max(0, minTrab - cfg.horas_diarias * 60 * entradas)
+      minTrab = Math.round(minTrab)
+      const jornadaEsperada = cfg.horas_diarias * 60 * entradas
+      const saldo = minTrab - jornadaEsperada // positivo = extra, negativo = deve
+      const extra = Math.max(0, saldo)
+      const negativo = Math.min(0, saldo)
       const foto = await dbGet(`SELECT COUNT(*) as n FROM registros WHERE funcionario_id = ? AND foto_arquivo IS NOT NULL`, [f.id])
-      result.push({ ...f, entradas, minTrab: Math.round(minTrab), extra: Math.round(extra), fotos: foto.n, status: extra > cfg.tolerancia_min ? 'Hora extra' : entradas > 0 ? 'Regular' : 'Sem ponto' })
+      const status = saldo > cfg.tolerancia_min ? 'Hora extra' : saldo < -cfg.tolerancia_min ? 'Horas a compensar' : entradas > 0 ? 'Regular' : 'Sem ponto'
+      result.push({ ...f, entradas, minTrab, jornadaEsperada, saldo, extra, negativo, fotos: foto.n, status })
     }
     res.json({ funcionarios: result, config: cfg })
   } catch(e) { res.status(500).json({ erro: e.message }) }

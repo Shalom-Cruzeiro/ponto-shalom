@@ -350,22 +350,33 @@ async function renderRel() {
   try {
     const { funcionarios: funcs, config: cfg } = await api('GET', '/relatorio')
     const totalE = funcs.reduce((s, f) => s + f.entradas, 0)
-    const totalX = funcs.reduce((s, f) => s + f.extra, 0)
-    const alertas = funcs.filter(f => f.extra > cfg.tolerancia_min).length
+    const totalExtra = funcs.reduce((s, f) => s + (f.saldo > 0 ? f.saldo : 0), 0)
+    const totalDeve = funcs.reduce((s, f) => s + (f.saldo < 0 ? Math.abs(f.saldo) : 0), 0)
     const totalF = funcs.reduce((s, f) => s + f.fotos, 0)
     rm.innerHTML = `
       <div class="metric"><div class="ml">Funcionários</div><div class="mv">${funcs.length}</div></div>
       <div class="metric"><div class="ml">Total entradas</div><div class="mv">${totalE}</div></div>
-      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalX > 0 ? 'var(--red)' : 'var(--green)'}">${fmtH(totalX)}</div></div>
+      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtra > 0 ? 'var(--red)' : 'var(--green)'}">${totalExtra > 0 ? '+' : ''}${fmtH(totalExtra)}</div></div>
+      <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve > 0 ? 'var(--warn)' : 'var(--green)'}">${totalDeve > 0 ? '-' : ''}${fmtH(totalDeve)}</div></div>
       <div class="metric"><div class="ml">Fotos salvas</div><div class="mv">${totalF}</div></div>`
-    const statusBadge = (f) => f.extra > cfg.tolerancia_min ? `<span class="badge bd">+${fmtH(f.extra)}</span>` : f.entradas > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem ponto</span>'
+    const statusBadge = (f) => {
+      if (!f.saldo && f.saldo !== 0) return f.entradas > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem ponto</span>'
+      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(f.saldo)} extra</span>`
+      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(f.saldo)} a compensar</span>`
+      if (f.entradas > 0) return '<span class="badge bk">Regular</span>'
+      return '<span class="badge bg">Sem ponto</span>'
+    }
     rb.innerHTML = funcs.map(f => {
-      const pct = Math.min(100, cfg.horas_diarias > 0 ? Math.round((f.minTrab / (cfg.horas_diarias * 60)) * 100) : 0)
+      const pct = Math.min(100, f.jornadaEsperada > 0 ? Math.round((f.minTrab / f.jornadaEsperada) * 100) : 0)
+      const corBarra = f.saldo > cfg.tolerancia_min ? '#E24B4A' : f.saldo < -cfg.tolerancia_min ? '#BA7517' : '#185FA5'
+      const saldoTexto = f.saldo > 0 ? `+${fmtH(f.saldo)}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
+      const corSaldo = f.saldo > cfg.tolerancia_min ? 'var(--red)' : f.saldo < -cfg.tolerancia_min ? 'var(--warn)' : 'var(--green)'
       return `<tr>
         <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
         <td>${f.entradas}</td>
         <td>${fmtH(f.minTrab)}</td>
-        <td><div style="display:flex;align-items:center;gap:6px;"><div class="pb" style="width:80px;"><div class="pf" style="width:${pct}%;background:${f.extra > cfg.tolerancia_min ? '#E24B4A' : '#185FA5'};"></div></div>${pct}%</div></td>
+        <td><div style="display:flex;align-items:center;gap:6px;"><div class="pb" style="width:80px;"><div class="pf" style="width:${pct}%;background:${corBarra};"></div></div>${pct}%</div></td>
+        <td style="color:${corSaldo};font-weight:500;">${saldoTexto}</td>
         <td>${f.fotos > 0 ? `<span class="badge bk"><i class="ti ti-camera"></i> ${f.fotos}</span>` : '<span class="badge bg">0</span>'}</td>
         <td>${statusBadge(f)}</td>
       </tr>`
