@@ -1,4 +1,4 @@
-﻿// Estado global
+// Estado global
 let TOKEN = localStorage.getItem('ponto_token') || null
 let SESSION = JSON.parse(localStorage.getItem('ponto_session') || 'null')
 let FUNCS = []
@@ -19,7 +19,7 @@ async function api(method, path, body) {
   const res = await fetch('/api' + path, opts)
   const data = await res.json()
   if (!res.ok) {
-    const err = new Error(data.erro || 'Erro na requisiÃ§Ã£o')
+    const err = new Error(data.erro || 'Erro na requisição')
     err.data = data
     err.status = res.status
     throw err
@@ -27,7 +27,7 @@ async function api(method, path, body) {
   return data
 }
 
-// RelÃ³gio
+// Relógio
 setInterval(() => {
   if (SESSION) el('hdr-hora').textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }, 1000)
@@ -36,7 +36,7 @@ setInterval(() => {
 async function initLogin() {
   const lojas = await api('GET', '/lojas')
   const ll = el('ll')
-  ll.innerHTML = '<option value="">â€” Selecione a loja â€”</option>'
+  ll.innerHTML = '<option value="">— Selecione a loja —</option>'
   lojas.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; ll.appendChild(o) })
   if (TOKEN && SESSION) {
     showMain()
@@ -96,13 +96,13 @@ async function loadFuncs() {
 
   // sel-func (registrar ponto)
   const sf = el('sel-func')
-  sf.innerHTML = '<option value="">â€” Selecione o funcionÃ¡rio â€”</option>'
+  sf.innerHTML = '<option value="">— Selecione o funcionário —</option>'
   FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; sf.appendChild(o) })
 
-  // hf (filtro histÃ³rico)
+  // hf (filtro histórico)
   const hf = el('hf')
   if (hf) {
-    hf.innerHTML = '<option value="">Todos os funcionÃ¡rios</option>'
+    hf.innerHTML = '<option value="">Todos os funcionários</option>'
     FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; hf.appendChild(o) })
   }
 
@@ -148,10 +148,10 @@ async function updJorn() {
       el('jorn-fill').style.background = '#185FA5'
       je.style.display = 'flex'
       je.className = 'alert alert-i'
-      je.innerHTML = '<i class="ti ti-clock-play"></i><span>Horas calculadas apÃ³s registrar a saÃ­da</span>'
+      je.innerHTML = '<i class="ti ti-clock-play"></i><span>Horas calculadas após registrar a saída</span>'
       return
     }
-    // Entrada e saÃ­da registradas â€” calcular horas reais
+    // Entrada e saída registradas — calcular horas reais
     let pausaMins = 0
     if (pausa && volta) pausaMins = (new Date(volta.dt) - new Date(pausa.dt)) / 60000
     const minT = Math.max(0, (new Date(saida.dt) - new Date(entrada.dt)) / 60000 - pausaMins)
@@ -174,13 +174,13 @@ async function updJorn() {
 
 function selTipo(tipo) {
   const fid = el('sel-func').value
-  if (!fid) { showErr('s1-err', 'Selecione um funcionÃ¡rio.'); return }
+  if (!fid) { showErr('s1-err', 'Selecione um funcionário.'); return }
   el('s1-err').style.display = 'none'
   const func = FUNCS.find(f => f.id == fid)
-  const L = { entrada: 'Entrada', saida: 'SaÃ­da', pausa: 'Pausa', volta: 'Volta da pausa' }
+  const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
   pendente = { funcId: fid, tipo, fNome: func.nome }
-  el('s2-title').textContent = 'ConfirmaÃ§Ã£o â€” ' + L[tipo]
-  el('s2-sub').textContent = func.nome + ' Â· ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  el('s2-title').textContent = 'Confirmação — ' + L[tipo]
+  el('s2-sub').textContent = func.nome + ' · ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   el('step1').style.display = 'none'
   el('step2').style.display = 'block'
   setStepDots(1)
@@ -211,7 +211,7 @@ async function toggleCam() {
     el('btn-foto').style.display = 'inline-flex'
     el('s2-err').style.display = 'none'
   } catch (e) {
-    showErr('s2-err', 'CÃ¢mera nÃ£o disponÃ­vel. VocÃª pode confirmar sem foto.')
+    showErr('s2-err', 'Câmera não disponível. Você pode confirmar sem foto.')
     adicionarBtnSemFoto()
   }
 }
@@ -230,7 +230,7 @@ function stopCam() {
   const vid = el('vid')
   vid.style.display = 'none'; vid.srcObject = null
   el('cam-ph').style.display = 'flex'
-  el('btn-cam').innerHTML = '<i class="ti ti-camera"></i> Ativar cÃ¢mera'
+  el('btn-cam').innerHTML = '<i class="ti ti-camera"></i> Ativar câmera'
   el('btn-foto').style.display = 'none'
 }
 
@@ -238,7 +238,7 @@ function tirarFoto() {
   const vid = el('vid'), cv = el('snap-canvas')
   cv.width = vid.videoWidth || 800; cv.height = vid.videoHeight || 600
   const ctx = cv.getContext('2d')
-  // Espelhar horizontalmente (corrige cÃ¢mera frontal)
+  // Espelhar horizontalmente (corrige câmera frontal)
   ctx.save(); ctx.scale(-1, 1); ctx.drawImage(vid, -cv.width, 0); ctx.restore()
   fotoDataUrl = cv.toDataURL('image/jpeg', 0.7)
   el('foto-img').src = fotoDataUrl
@@ -258,9 +258,9 @@ function refazerFoto() {
 async function confirmarRegistro() {
   try {
     await api('POST', '/registros', { funcionarioId: pendente.funcId, tipo: pendente.tipo, fotoBase64: fotoDataUrl || null })
-    const L = { entrada: 'Entrada', saida: 'SaÃ­da', pausa: 'Pausa', volta: 'Volta da pausa' }
+    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
     el('s3-msg').textContent = L[pendente.tipo] + ' registrada!'
-    el('s3-sub').textContent = pendente.fNome + ' Â· ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (fotoDataUrl ? ' Â· com foto' : ' Â· sem foto')
+    el('s3-sub').textContent = pendente.fNome + ' · ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (fotoDataUrl ? ' · com foto' : ' · sem foto')
     el('step2').style.display = 'none'
     el('step3').style.display = 'block'
     setStepDots(2)
@@ -290,7 +290,7 @@ function novoRegistro() {
   const bsf = el('btn-semfoto'); if (bsf) bsf.remove()
 }
 
-// --- HistÃ³rico ---
+// --- Histórico ---
 async function renderHist() {
   const tb = el('hist-body'); if (!tb) return
   const ff = el('hf') ? el('hf').value : ''
@@ -302,12 +302,12 @@ async function renderHist() {
     const regs = await api('GET', url)
     if (!regs.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted);">Nenhum registro ainda</td></tr>'; return }
     const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
-    const L = { entrada: 'Entrada', saida: 'SaÃ­da', pausa: 'Pausa', volta: 'Volta da pausa' }
+    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
     tb.innerHTML = regs.map(r => `<tr>
       <td style="white-space:nowrap;">${fmtDT(r.dt)}</td>
       <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.funcNome)}</div>${r.funcNome}</div></td>
       <td><span class="badge ${BC[r.tipo]}">${L[r.tipo]}</span></td>
-      <td>${r.foto_arquivo ? '<span class="badge bk"><i class="ti ti-camera"></i> sim</span>' : '<span class="badge bg">nÃ£o</span>'}</td>
+      <td>${r.foto_arquivo ? '<span class="badge bk"><i class="ti ti-camera"></i> sim</span>' : '<span class="badge bg">não</span>'}</td>
     </tr>`).join('')
   } catch (e) { tb.innerHTML = '<tr><td colspan="4" style="padding:12px;color:var(--muted);">Erro ao carregar</td></tr>' }
 }
@@ -323,7 +323,7 @@ async function renderFotos() {
     el('foto-info').textContent = fotos.length + ' foto(s) armazenadas'
     if (!fotos.length) { grid.innerHTML = ''; empty.style.display = 'block'; return }
     empty.style.display = 'none'
-    const L = { entrada: 'Entrada', saida: 'SaÃ­da', pausa: 'Pausa', volta: 'Volta da pausa' }
+    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
     const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
     grid.innerHTML = fotos.map(f => `
       <div class="foto-card">
@@ -344,7 +344,7 @@ async function limparFotosAntigas() {
   } catch (e) { alert('Erro: ' + e.message) }
 }
 
-// --- RelatÃ³rio ---
+// --- Relatório ---
 async function renderRel() {
   const rm = el('rel-metrics'), rb = el('rel-body'); if (!rm || !rb) return
   try {
@@ -354,7 +354,7 @@ async function renderRel() {
     const totalDeve = funcs.reduce((s, f) => s + (f.saldo < 0 ? Math.abs(f.saldo) : 0), 0)
     const totalF = funcs.reduce((s, f) => s + f.fotos, 0)
     rm.innerHTML = `
-      <div class="metric"><div class="ml">FuncionÃ¡rios</div><div class="mv">${funcs.length}</div></div>
+      <div class="metric"><div class="ml">Funcionários</div><div class="mv">${funcs.length}</div></div>
       <div class="metric"><div class="ml">Total entradas</div><div class="mv">${totalE}</div></div>
       <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtra > 0 ? 'var(--red)' : 'var(--green)'}">${totalExtra > 0 ? '+' : ''}${fmtH(totalExtra)}</div></div>
       <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve > 0 ? 'var(--warn)' : 'var(--green)'}">${totalDeve > 0 ? '-' : ''}${fmtH(totalDeve)}</div></div>
@@ -388,11 +388,11 @@ async function exportCSV() {
   try {
     const { funcionarios: funcs, config: cfg } = await api('GET', '/relatorio')
     const regs = await api('GET', '/registros?limite=2000')
-    let csv = 'FuncionÃ¡rio,Cargo,Entradas,Horas Trab.,Horas Extras,Fotos,Status\n'
+    let csv = 'Funcionário,Cargo,Entradas,Horas Trab.,Horas Extras,Fotos,Status\n'
     funcs.forEach(f => { csv += `"${f.nome}","${f.cargo}",${f.entradas},"${fmtH(f.minTrab)}","${fmtH(f.extra)}",${f.fotos},"${f.status}"\n` })
-    csv += '\nHistÃ³rico\nData/Hora,FuncionÃ¡rio,Evento,Com foto\n'
-    const L = { entrada: 'Entrada', saida: 'SaÃ­da', pausa: 'Pausa', volta: 'Volta da pausa' }
-    regs.forEach(r => { csv += `"${fmtDT(r.dt)}","${r.funcNome}","${L[r.tipo]}","${r.foto_arquivo ? 'sim' : 'nÃ£o'}"\n` })
+    csv += '\nHistórico\nData/Hora,Funcionário,Evento,Com foto\n'
+    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
+    regs.forEach(r => { csv += `"${fmtDT(r.dt)}","${r.funcNome}","${L[r.tipo]}","${r.foto_arquivo ? 'sim' : 'não'}"\n` })
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a'); a.href = url
@@ -406,7 +406,7 @@ async function salvarCfg() {
   try {
     await api('PUT', '/config', { horas_diarias: parseInt(el('cfg-h').value) || 8, tolerancia_min: parseInt(el('cfg-t').value) || 10, dias_fotos: parseInt(el('cfg-dias').value) || 30 })
     await loadConfig()
-    el('cfg-ok').textContent = 'ConfiguraÃ§Ãµes salvas!'; el('cfg-ok').style.display = 'block'
+    el('cfg-ok').textContent = 'Configurações salvas!'; el('cfg-ok').style.display = 'block'
     setTimeout(() => el('cfg-ok').style.display = 'none', 2500)
   } catch (e) { alert('Erro: ' + e.message) }
 }
@@ -417,7 +417,7 @@ async function cadastrarFunc() {
   const dias_semana = parseInt(el('novo-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
-    alert('HorÃ¡rio invÃ¡lido. Use o formato HH:MM, ex: 14:00'); return
+    alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
     await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim, dias_semana })
@@ -430,7 +430,7 @@ async function cadastrarFunc() {
 
 async function alterarSenha() {
   const s = el('nova-senha').value
-  if (s.length < 4) { alert('MÃ­nimo 4 caracteres.'); return }
+  if (s.length < 4) { alert('Mínimo 4 caracteres.'); return }
   try {
     await api('PUT', '/senha', { senha: s })
     el('nova-senha').value = ''
@@ -443,9 +443,9 @@ function renderFuncBody() {
   const fb = el('func-body'); if (!fb) return
   fb.innerHTML = FUNCS.map(f => `<tr>
     <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
-    <td>${f.cargo || 'â€”'}</td>
+    <td>${f.cargo || '—'}</td>
     <td>${f.hora_inicio && f.hora_fim
-      ? `<span class="badge bi"><i class="ti ti-clock"></i> ${f.hora_inicio} â€” ${f.hora_fim}</span>`
+      ? `<span class="badge bi"><i class="ti ti-clock"></i> ${f.hora_inicio} — ${f.hora_fim}</span>`
       : '<span class="badge bg">Sem jornada</span>'}</td>
     <td>${f.dias_semana ? `<span class="badge bg">${f.dias_semana}x/sem</span>` : '<span class="badge bg">5x/sem</span>'}</td>
     <td><span class="badge bk">Ativo</span></td>
@@ -484,7 +484,7 @@ async function salvarJornada() {
   const dias_semana = parseInt(el('edit-dias-semana').value) || 5
   if (!nome) { alert('Informe o nome.'); return }
   if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
-    alert('HorÃ¡rio invÃ¡lido. Use o formato HH:MM, ex: 14:00'); return
+    alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
   }
   try {
     await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim, dias_semana })
@@ -515,19 +515,19 @@ function showErr(id, msg) {
   const e = el(id); e.textContent = msg; e.style.display = 'block'
 }
 
-// --- ApuraÃ§Ã£o mensal ---
+// --- Apuração mensal ---
 function initApuracao() {
-  // Popular anos (Ãºltimos 3 anos)
+  // Popular anos (últimos 3 anos)
   const anoSel = el('apur-ano')
   const anoAtual = new Date().getFullYear()
   anoSel.innerHTML = ''
   for (let a = anoAtual; a >= anoAtual - 2; a--) {
     const o = document.createElement('option'); o.value = a; o.textContent = a; anoSel.appendChild(o)
   }
-  // MÃªs atual
+  // Mês atual
   el('apur-mes').value = new Date().getMonth() + 1
 
-  // Popular funcionÃ¡rios
+  // Popular funcionários
   const af = el('apur-func')
   af.innerHTML = '<option value="">Todos</option>'
   FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; af.appendChild(o) })
@@ -541,12 +541,12 @@ async function renderApuracao() {
   const funcFiltro = el('apur-func').value
   if (!mes || !ano) return
 
-  // Datas do mÃªs
+  // Datas do mês
   const dtInicio = new Date(ano, mes - 1, 1).toISOString()
   const dtFim = new Date(ano, mes, 0, 23, 59, 59).toISOString()
   const diasNoMes = new Date(ano, mes, 0).getDate()
 
-  // Dias Ãºteis no mÃªs (seg-sex)
+  // Dias úteis no mês (seg-sex)
   let diasUteis = 0
   for (let d = 1; d <= diasNoMes; d++) {
     const dia = new Date(ano, mes - 1, d).getDay()
@@ -569,7 +569,7 @@ async function renderApuracao() {
         porDia[dia][r.tipo] = r.dt
       })
 
-      // Calcular dias trabalhados e horas reais (sÃ³ conta dias com entrada E saÃ­da)
+      // Calcular dias trabalhados e horas reais (só conta dias com entrada E saída)
       const diasTrabalhados = Object.keys(porDia).filter(d => porDia[d].entrada).length
       const diasCompletos = Object.keys(porDia).filter(d => porDia[d].entrada && porDia[d].saida).length
       let minsTrabalhados = 0
@@ -603,19 +603,19 @@ async function renderApuracao() {
       return { func, diasTrabalhados, diasCompletos, diasUteis, diasEsperados, minsTrabalhados, minsEsperados, minsExtras, saldoMins, faltas, porDia }
     })
 
-    // MÃ©tricas totais
+    // Métricas totais
     const totalDias = rows.reduce((s, r) => s + r.diasTrabalhados, 0)
     const totalMins = rows.reduce((s, r) => s + r.minsTrabalhados, 0)
     const totalExtras = rows.reduce((s, r) => s + Math.max(0, r.saldoMins), 0)
     const totalDeve = rows.reduce((s, r) => s + Math.max(0, -r.saldoMins), 0)
     const totalFaltas = rows.reduce((s, r) => s + r.faltas, 0)
-    const nomeMes = ['Janeiro','Fevereiro','MarÃ§o','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
+    const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
 
     apuracaoAtual = { rows, nomeMes, ano, diasUteis, lojaNome: SESSION.lojaNome }
 
     el('apur-metrics').innerHTML = `
-      <div class="metric"><div class="ml">MÃªs</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
-      <div class="metric"><div class="ml">Dias Ãºteis</div><div class="mv">${diasUteis}</div></div>
+      <div class="metric"><div class="ml">Mês</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
+      <div class="metric"><div class="ml">Dias úteis</div><div class="mv">${diasUteis}</div></div>
       <div class="metric"><div class="ml">Total horas trab.</div><div class="mv">${fmtH(totalMins)}</div></div>
       <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${totalExtras>0?'+':''}${fmtH(totalExtras)}</div></div>
       <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve>0?'var(--warn)':'var(--green)'}">${totalDeve>0?'-':''}${fmtH(totalDeve)}</div></div>
@@ -635,7 +635,7 @@ async function renderApuracao() {
         <td>${fmtH(r.minsTrabalhados)}</td>
         <td>${fmtH(r.minsEsperados)}</td>
         <td style="color:${corSaldo};font-weight:500;">${saldoTxt}</td>
-        <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : 'â€”'}</td>
+        <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : '—'}</td>
         <td>${badge}</td>
       </tr>`
     }).join('')
@@ -647,7 +647,7 @@ async function renderApuracao() {
 }
 
 function verDetalhe(func, porDia, periodo) {
-  el('apur-detalhe-titulo').textContent = `Detalhe â€” ${func.nome} â€” ${periodo}`
+  el('apur-detalhe-titulo').textContent = `Detalhe — ${func.nome} — ${periodo}`
   el('apur-detalhe-card').style.display = 'block'
   el('apur-detalhe-card').scrollIntoView({ behavior: 'smooth' })
 
@@ -658,8 +658,8 @@ function verDetalhe(func, porDia, periodo) {
 
   detalheAtual = { func, dias, porDia, periodo, lojaNome: SESSION.lojaNome }
 
-  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'â€”'
-  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'SÃ¡b']
+  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
   el('apur-detalhe-body').innerHTML = dias.map(dia => {
     const d = porDia[dia]
@@ -669,7 +669,7 @@ function verDetalhe(func, porDia, periodo) {
     const temSaida = !!d.saida
     const mins = calcMins(d)
     const status = !temEntrada ? '<span class="badge bd">Falta</span>' :
-                   !temSaida ? '<span class="badge bw">Sem saÃ­da</span>' :
+                   !temSaida ? '<span class="badge bw">Sem saída</span>' :
                    '<span class="badge bk">Ok</span>'
     return `<tr>
       <td>${dia}</td>
@@ -678,16 +678,16 @@ function verDetalhe(func, porDia, periodo) {
       <td>${fmtHora(d.pausa)}</td>
       <td>${fmtHora(d.volta)}</td>
       <td>${fmtHora(d.saida)}</td>
-      <td>${temEntrada && temSaida ? fmtH(Math.round(mins)) : 'â€”'}</td>
+      <td>${temEntrada && temSaida ? fmtH(Math.round(mins)) : '—'}</td>
       <td>${status}</td>
     </tr>`
-  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--muted);">Nenhum registro neste perÃ­odo</td></tr>'
+  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--muted);">Nenhum registro neste período</td></tr>'
 }
 
 async function exportApuracaoCSV() {
   const mes = parseInt(el('apur-mes').value)
   const ano = parseInt(el('apur-ano').value)
-  const nomeMes = ['Janeiro','Fevereiro','MarÃ§o','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
+  const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
   const dtInicio = new Date(ano, mes - 1, 1).toISOString()
   const dtFim = new Date(ano, mes, 0, 23, 59, 59).toISOString()
   const diasNoMes = new Date(ano, mes, 0).getDate()
@@ -700,9 +700,9 @@ async function exportApuracaoCSV() {
   const regs = await api('GET', `/registros?limite=5000`)
   const regsDoMes = regs.filter(r => r.dt >= dtInicio && r.dt <= dtFim)
 
-  let csv = `ApuraÃ§Ã£o de Horas â€” ${nomeMes} ${ano} â€” ${SESSION.lojaNome}\n`
-  csv += `Dias Ãºteis no mÃªs: ${diasUteis}\n\n`
-  csv += `FuncionÃ¡rio,Cargo,Dias Trabalhados,Dias Ãšteis,Horas Trabalhadas,Horas Esperadas,Horas Extras,Faltas,Status\n`
+  let csv = `Apuração de Horas — ${nomeMes} ${ano} — ${SESSION.lojaNome}\n`
+  csv += `Dias úteis no mês: ${diasUteis}\n\n`
+  csv += `Funcionário,Cargo,Dias Trabalhados,Dias Úteis,Horas Trabalhadas,Horas Esperadas,Horas Extras,Faltas,Status\n`
 
   for (const func of FUNCS) {
     const regsFunc = regsDoMes.filter(r => r.funcNome === func.nome)
@@ -750,7 +750,7 @@ async function renomearLoja() {
     setTimeout(() => el('loja-ok').style.display = 'none', 2500)
     // Recarregar lista de lojas no login e na tabela
     const lojas = await api('GET', '/lojas')
-    const ll = el('ll'); if(ll){ ll.innerHTML='<option value="">â€” Selecione a loja â€”</option>'; lojas.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;ll.appendChild(o)}) }
+    const ll = el('ll'); if(ll){ ll.innerHTML='<option value="">— Selecione a loja —</option>'; lojas.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;ll.appendChild(o)}) }
     if (SESSION.role === 'master') renderTodasLojas()
   } catch (e) { alert('Erro: ' + e.message) }
 }
@@ -772,7 +772,7 @@ async function renderTodasLojas() {
 
 async function alterarSenhaLoja(id) {
   const s = el(`senha-loja-${id}`).value
-  if (!s || s.length < 4) { alert('MÃ­nimo 4 caracteres.'); return }
+  if (!s || s.length < 4) { alert('Mínimo 4 caracteres.'); return }
   try {
     await api('PUT', `/lojas/${id}/senha`, { senha: s })
     el(`senha-loja-${id}`).value = ''
@@ -782,7 +782,7 @@ async function alterarSenhaLoja(id) {
 }
 
 // --- Escala de trabalho ---
-const DIAS_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'SÃ¡b']
+const DIAS_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
 function initEscala() {
   const anoSel = el('escala-ano')
@@ -794,7 +794,7 @@ function initEscala() {
   el('escala-mes').value = new Date().getMonth() + 1
 
   const ef = el('escala-func')
-  ef.innerHTML = '<option value="">â€” Selecione o funcionÃ¡rio â€”</option>'
+  ef.innerHTML = '<option value="">— Selecione o funcionário —</option>'
   FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; ef.appendChild(o) })
 }
 
@@ -804,14 +804,14 @@ async function renderEscala() {
   const ano = parseInt(el('escala-ano').value)
   const cal = el('escala-cal')
 
-  if (!funcId) { cal.innerHTML = '<div style="color:var(--muted);padding:20px;">Selecione um funcionÃ¡rio.</div>'; el('escala-total').textContent = ''; return }
+  if (!funcId) { cal.innerHTML = '<div style="color:var(--muted);padding:20px;">Selecione um funcionário.</div>'; el('escala-total').textContent = ''; return }
 
   // Carregar escala salva
   const diasSalvos = await api('GET', `/escala?funcId=${funcId}&mes=${mes}&ano=${ano}`)
   const escalaMapa = {}
   diasSalvos.forEach(d => { escalaMapa[d.data] = { tipo: d.tipo, horas: d.horas } })
 
-  // Montar calendÃ¡rio
+  // Montar calendário
   const primeiroDia = new Date(ano, mes - 1, 1)
   const ultimoDia = new Date(ano, mes, 0).getDate()
   const diaSemanaInicio = primeiroDia.getDay() // 0=dom
@@ -819,22 +819,22 @@ async function renderEscala() {
   let totalHoras = 0
   let totalDias = 0
 
-  // CabeÃ§alhos
+  // Cabeçalhos
   let html = DIAS_SEMANA_LABEL.map(d => `<div style="text-align:center;font-size:11px;font-weight:600;color:var(--muted);padding:4px 0;">${d}</div>`).join('')
 
-  // CÃ©lulas vazias antes do dia 1
+  // Células vazias antes do dia 1
   for (let i = 0; i < diaSemanaInicio; i++) {
     html += '<div></div>'
   }
 
-  // Dias do mÃªs
+  // Dias do mês
   for (let dia = 1; dia <= ultimoDia; dia++) {
     const data = `${ano}-${String(mes).padStart(2,'0')}-${String(dia).padStart(2,'0')}`
     const diaSemana = new Date(ano, mes - 1, dia).getDay()
     const isDom = diaSemana === 0
     const salvo = escalaMapa[data]
 
-    // Tipo padrÃ£o: domingo=dom, outros=trabalha
+    // Tipo padrão: domingo=dom, outros=trabalha
     let tipo = salvo ? salvo.tipo : (isDom ? 'dom' : 'trabalha')
     let horas = salvo ? salvo.horas : (isDom ? 6 : 8)
     if (tipo === 'folga') horas = 0
@@ -847,7 +847,7 @@ async function renderEscala() {
       feriado: 'background:#FCEBEB;border:1.5px solid #A32D2D;color:#791F1F;',
       folga: 'background:var(--bg2);border:1.5px solid var(--border2);color:var(--muted);'
     }
-    const horasLabel = horas > 0 ? `${horas}h` : 'â€”'
+    const horasLabel = horas > 0 ? `${horas}h` : '—'
 
     html += `<div onclick="toggleEscala('${funcId}','${data}','${tipo}',${horas},${isDom?1:0})"
       style="cursor:pointer;border-radius:8px;padding:6px 4px;text-align:center;user-select:none;${cores[tipo]}transition:opacity .15s;"
@@ -859,11 +859,11 @@ async function renderEscala() {
   }
 
   cal.innerHTML = html
-  el('escala-total').textContent = `Total previsto: ${totalDias} dias Â· ${fmtH(totalHoras * 60)}`
+  el('escala-total').textContent = `Total previsto: ${totalDias} dias · ${fmtH(totalHoras * 60)}`
 }
 
 async function toggleEscala(funcId, data, tipoAtual, horasAtual, isDom) {
-  // Ciclo: trabalha â†’ feriado â†’ folga â†’ trabalha (dom: dom â†’ feriado â†’ folga â†’ dom)
+  // Ciclo: trabalha → feriado → folga → trabalha (dom: dom → feriado → folga → dom)
   let novoTipo, novasHoras
   if (isDom) {
     if (tipoAtual === 'dom') { novoTipo = 'feriado'; novasHoras = 0 }
@@ -881,12 +881,12 @@ async function toggleEscala(funcId, data, tipoAtual, horasAtual, isDom) {
 // Iniciar
 initLogin()
 
-// --- GeraÃ§Ã£o de PDF ---
+// --- Geração de PDF ---
 let apuracaoAtual = null
 let detalheAtual = null
 
 function gerarPDF() {
-  if (!apuracaoAtual) { alert('Carregue a apuraÃ§Ã£o primeiro.'); return }
+  if (!apuracaoAtual) { alert('Carregue a apuração primeiro.'); return }
   const { rows, nomeMes, ano, diasUteis, lojaNome } = apuracaoAtual
   const { jsPDF } = window.jspdf
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
@@ -894,23 +894,23 @@ function gerarPDF() {
   const W = 210, margem = 14
   let y = 14
 
-  // CabeÃ§alho
+  // Cabeçalho
   doc.setFillColor(24, 95, 165)
   doc.rect(0, 0, W, 28, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(16); doc.setFont(undefined, 'bold')
   doc.text('Grupo Shalom', margem, 11)
   doc.setFontSize(10); doc.setFont(undefined, 'normal')
-  doc.text('Folha de Ponto â€” ' + nomeMes + ' ' + ano, margem, 18)
+  doc.text('Folha de Ponto — ' + nomeMes + ' ' + ano, margem, 18)
   doc.text(lojaNome, margem, 24)
   doc.setTextColor(180, 210, 255)
   doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), W - margem, 18, { align: 'right' })
   y = 36
 
-  // Info do mÃªs
+  // Info do mês
   doc.setTextColor(100, 100, 100)
   doc.setFontSize(9)
-  doc.text(`Dias Ãºteis no mÃªs: ${diasUteis}   |   Jornada diÃ¡ria: ${CONFIG.horas_diarias}h   |   TolerÃ¢ncia: ${CONFIG.tolerancia_min} min`, margem, y)
+  doc.text(`Dias úteis no mês: ${diasUteis}   |   Jornada diária: ${CONFIG.horas_diarias}h   |   Tolerância: ${CONFIG.tolerancia_min} min`, margem, y)
   y += 8
 
   // Tabela resumo com saldo de horas
@@ -920,19 +920,19 @@ function gerarPDF() {
     const status = r.faltas > 3 ? 'Muitas faltas' : saldo > CONFIG.tolerancia_min ? 'Hora extra' : saldo < -CONFIG.tolerancia_min ? 'A compensar' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
     return [
       r.func.nome,
-      r.func.cargo || 'â€”',
+      r.func.cargo || '—',
       `${r.diasTrabalhados} / ${r.diasUteis}`,
       fmtH(r.minsTrabalhados),
       fmtH(r.minsEsperados),
       saldoTexto,
-      r.faltas > 0 ? String(r.faltas) : 'â€”',
+      r.faltas > 0 ? String(r.faltas) : '—',
       status
     ]
   })
 
   doc.autoTable({
     startY: y,
-    head: [['FuncionÃ¡rio', 'Cargo', 'Dias', 'Horas trab.', 'Esperado', 'Saldo', 'Faltas', 'Status']],
+    head: [['Funcionário', 'Cargo', 'Dias', 'Horas trab.', 'Esperado', 'Saldo', 'Faltas', 'Status']],
     body: tableData,
     theme: 'grid',
     headStyles: { fillColor: [24, 95, 165], textColor: 255, fontStyle: 'bold', fontSize: 9 },
@@ -962,43 +962,43 @@ function gerarPDF() {
     }
   })
 
-  // Totais no rodapÃ© da tabela
+  // Totais no rodapé da tabela
   const totalExtra = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo > 0 ? saldo : 0) }, 0)
   const totalDeve = rows.reduce((s, r) => { const saldo = r.minsTrabalhados - r.minsEsperados; return s + (saldo < 0 ? Math.abs(saldo) : 0) }, 0)
   const fy = doc.lastAutoTable.finalY + 6
   doc.setFontSize(9); doc.setTextColor(80, 80, 80)
   doc.text(`Total horas extras: ${fmtH(totalExtra)}   |   Total a compensar: ${fmtH(totalDeve)}`, margem, fy)
 
-  // RodapÃ©
+  // Rodapé
   const pageH = doc.internal.pageSize.height
   doc.setDrawColor(200, 200, 200); doc.line(margem, pageH - 14, W - margem, pageH - 14)
   doc.setFontSize(8); doc.setTextColor(150, 150, 150)
-  doc.text('Grupo Shalom â€” Sistema de Registro de Ponto', margem, pageH - 8)
-  doc.text('PÃ¡gina 1', W - margem, pageH - 8, { align: 'right' })
+  doc.text('Grupo Shalom — Sistema de Registro de Ponto', margem, pageH - 8)
+  doc.text('Página 1', W - margem, pageH - 8, { align: 'right' })
 
   doc.save(`folha_ponto_${nomeMes}_${ano}_${lojaNome.replace(/ /g, '_')}.pdf`)
 }
 
 function gerarPDFDetalhe() {
-  if (!detalheAtual) { alert('Selecione um funcionÃ¡rio primeiro.'); return }
+  if (!detalheAtual) { alert('Selecione um funcionário primeiro.'); return }
   const { func, dias, porDia, periodo, lojaNome } = detalheAtual
   const { jsPDF } = window.jspdf
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const W = 210, margem = 14
 
-  // CabeÃ§alho
+  // Cabeçalho
   doc.setFillColor(24, 95, 165)
   doc.rect(0, 0, W, 30, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(16); doc.setFont(undefined, 'bold')
   doc.text('Grupo Shalom', margem, 11)
   doc.setFontSize(10); doc.setFont(undefined, 'normal')
-  doc.text('Folha de Ponto Individual â€” ' + periodo, margem, 18)
+  doc.text('Folha de Ponto Individual — ' + periodo, margem, 18)
   doc.text(lojaNome, margem, 24)
   doc.setTextColor(180, 210, 255)
   doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), W - margem, 18, { align: 'right' })
 
-  // Info funcionÃ¡rio
+  // Info funcionário
   let y = 38
   doc.setFillColor(240, 245, 255)
   doc.roundedRect(margem, y, W - margem * 2, 14, 3, 3, 'F')
@@ -1008,8 +1008,8 @@ function gerarPDFDetalhe() {
   doc.text(func.cargo || '', margem + 4, y + 11)
   y += 22
 
-  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'â€”'
-  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'SÃ¡b']
+  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
   const tableData = dias.map(dia => {
     const d = porDia[dia] || {}
@@ -1018,13 +1018,13 @@ function gerarPDFDetalhe() {
     const temEntrada = !!d.entrada
     const temSaida = !!d.saida
     const mins = calcMins(d)
-    const status = !temEntrada ? 'Falta' : !temSaida ? 'Sem saÃ­da' : 'Ok'
-    return [dia, diaSemana, fmtHora(d.entrada), fmtHora(d.pausa), fmtHora(d.volta), fmtHora(d.saida), temEntrada && temSaida ? fmtH(mins) : 'â€”', status]
+    const status = !temEntrada ? 'Falta' : !temSaida ? 'Sem saída' : 'Ok'
+    return [dia, diaSemana, fmtHora(d.entrada), fmtHora(d.pausa), fmtHora(d.volta), fmtHora(d.saida), temEntrada && temSaida ? fmtH(mins) : '—', status]
   })
 
   doc.autoTable({
     startY: y,
-    head: [['Data', 'Dia', 'Entrada', 'Pausa', 'Volta', 'SaÃ­da', 'Horas', 'Status']],
+    head: [['Data', 'Dia', 'Entrada', 'Pausa', 'Volta', 'Saída', 'Horas', 'Status']],
     body: tableData,
     theme: 'grid',
     headStyles: { fillColor: [24, 95, 165], textColor: 255, fontStyle: 'bold', fontSize: 9 },
@@ -1058,16 +1058,15 @@ function gerarPDFDetalhe() {
   doc.line(margem, sigY, margem + 70, sigY)
   doc.line(W - margem - 70, sigY, W - margem, sigY)
   doc.setFontSize(8); doc.setTextColor(120, 120, 120)
-  doc.text('Assinatura do FuncionÃ¡rio', margem + 35, sigY + 5, { align: 'center' })
+  doc.text('Assinatura do Funcionário', margem + 35, sigY + 5, { align: 'center' })
   doc.text('Assinatura do Gerente', W - margem - 35, sigY + 5, { align: 'center' })
 
-  // RodapÃ©
+  // Rodapé
   const pageH = doc.internal.pageSize.height
   doc.setDrawColor(200, 200, 200); doc.line(margem, pageH - 14, W - margem, pageH - 14)
   doc.setFontSize(8); doc.setTextColor(150, 150, 150)
-  doc.text('Grupo Shalom â€” Sistema de Registro de Ponto', margem, pageH - 8)
+  doc.text('Grupo Shalom — Sistema de Registro de Ponto', margem, pageH - 8)
   doc.text('Documento gerado automaticamente', W - margem, pageH - 8, { align: 'right' })
 
   doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
 }
-
