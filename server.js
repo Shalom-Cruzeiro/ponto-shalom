@@ -13,28 +13,30 @@ const sdb = new sqlite3.Database(DB_PATH)
 const dbRun = (sql, p=[]) => new Promise((res,rej) => sdb.run(sql,p,function(e){if(e)rej(e);else res(this)}))
 const dbAll = (sql, p=[]) => new Promise((res,rej) => sdb.all(sql,p,(e,r)=>{if(e)rej(e);else res(r)}))
 const dbGet = (sql, p=[]) => new Promise((res,rej) => sdb.get(sql,p,(e,r)=>{if(e)rej(e);else res(r)}))
-function agoraBrasilia(){const s=new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hour12:false});const[h,m]=s.split(':').map(Number);return h*60+m}
+function agoraBrasilia(){
+  const s=new Date().toLocaleString('en-US',{timeZone:'America/Sao_Paulo',hour:'2-digit',minute:'2-digit',hour12:false})
+  const[h,m]=s.split(':').map(Number)
+  return h*60+m
+}
 async function initDB(){
   await dbRun("CREATE TABLE IF NOT EXISTS lojas(id INTEGER PRIMARY KEY AUTOINCREMENT,nome TEXT UNIQUE NOT NULL,senha TEXT NOT NULL DEFAULT '1234')")
   await dbRun("CREATE TABLE IF NOT EXISTS config(loja_id INTEGER PRIMARY KEY,horas_diarias INTEGER DEFAULT 8,tolerancia_min INTEGER DEFAULT 10,dias_fotos INTEGER DEFAULT 30)")
-  await dbRun("CREATE TABLE IF NOT EXISTS funcionarios(id INTEGER PRIMARY KEY AUTOINCREMENT,loja_id INTEGER NOT NULL,nome TEXT NOT NULL,cargo TEXT DEFAULT 'Funcionario',ativo INTEGER DEFAULT 1,hora_inicio TEXT,hora_fim TEXT,dias_semana INTEGER DEFAULT 5)")
+  await dbRun("CREATE TABLE IF NOT EXISTS funcionarios(id INTEGER PRIMARY KEY AUTOINCREMENT,loja_id INTEGER NOT NULL,nome TEXT NOT NULL,cargo TEXT DEFAULT 'Funcionario',ativo INTEGER DEFAULT 1,hora_inicio TEXT,hora_fim TEXT)")
   await dbRun("CREATE TABLE IF NOT EXISTS registros(id INTEGER PRIMARY KEY AUTOINCREMENT,funcionario_id INTEGER NOT NULL,loja_id INTEGER NOT NULL,tipo TEXT NOT NULL,dt TEXT NOT NULL,foto_arquivo TEXT)")
-  await dbRun("CREATE TABLE IF NOT EXISTS escala(id INTEGER PRIMARY KEY AUTOINCREMENT,funcionario_id INTEGER NOT NULL,loja_id INTEGER NOT NULL,data TEXT NOT NULL,tipo TEXT NOT NULL DEFAULT 'trabalha',horas REAL NOT NULL DEFAULT 8,UNIQUE(funcionario_id,data))")
+  await dbRun("CREATE TABLE IF NOT EXISTS folgas(id INTEGER PRIMARY KEY AUTOINCREMENT,funcionario_id INTEGER NOT NULL,loja_id INTEGER NOT NULL,mes INTEGER NOT NULL,ano INTEGER NOT NULL,dia INTEGER NOT NULL,UNIQUE(funcionario_id,loja_id,mes,ano,dia))")
   try{await dbRun("ALTER TABLE funcionarios ADD COLUMN hora_inicio TEXT")}catch(_){}
-  try{await dbRun("ALTER TABLE funcionarios ADD COLUMN folgas_mes TEXT DEFAULT ''")}catch(_){}
   try{await dbRun("ALTER TABLE funcionarios ADD COLUMN hora_fim TEXT")}catch(_){}
-  try{await dbRun("ALTER TABLE funcionarios ADD COLUMN dias_semana INTEGER DEFAULT 5")}catch(_){}
-  const count = await dbGet("SELECT COUNT(*) as n FROM lojas")
-  if(count.n === 0){
-    const lojas=['Loja do Cruzeiro - Estacao','Loja do Cruzeiro - DelRey','Loja do Cruzeiro - Betim','Loja do Cruzeiro - Minas','Loja do Cruzeiro - BH Outlet','Loja do Cruzeiro - ViaShopping','Loja do Cruzeiro - Itau','Loja do Cruzeiro - Boulevard','Loja do Cruzeiro - Ipatinga','Loja do Cruzeiro - Shopping Cidade','Loja do Cruzeiro - Savassi','Loja do Cruzeiro - Valadares','Loja do Cruzeiro - Itabira']
-    for(const n of lojas){await dbRun("INSERT INTO lojas(nome,senha)VALUES(?,?)",[n,'1234'])}
+  const count=await dbGet("SELECT COUNT(*) as n FROM lojas")
+  if(count.n===0){
+    const L=['Loja do Cruzeiro - Estacao','Loja do Cruzeiro - DelRey','Loja do Cruzeiro - Betim','Loja do Cruzeiro - Minas','Loja do Cruzeiro - BH Outlet','Loja do Cruzeiro - ViaShopping','Loja do Cruzeiro - Itau','Loja do Cruzeiro - Boulevard','Loja do Cruzeiro - Ipatinga','Loja do Cruzeiro - Shopping Cidade','Loja do Cruzeiro - Savassi','Loja do Cruzeiro - Valadares','Loja do Cruzeiro - Itabira']
+    for(const n of L){await dbRun("INSERT INTO lojas(nome,senha)VALUES(?,?)",[n,'1234'])}
     const ids=await dbAll("SELECT id FROM lojas ORDER BY id")
     for(const l of ids){await dbRun("INSERT OR IGNORE INTO config(loja_id)VALUES(?)",[l.id])}
     console.log('13 lojas criadas.')
   } else {
     const ids=await dbAll("SELECT id FROM lojas ORDER BY id")
     for(const l of ids){await dbRun("INSERT OR IGNORE INTO config(loja_id)VALUES(?)",[l.id])}
-    console.log('Banco existente com '+count.n+' lojas.')
+    console.log('Banco existente: '+count.n+' lojas.')
   }
 }
 app.use(express.json({limit:'10mb'}))
@@ -45,39 +47,40 @@ app.post('/api/login',async(req,res)=>{try{const{loja,senha}=req.body;const row=
 app.post('/api/logout',auth,(req,res)=>{delete sessions[req.headers['x-session']];res.json({ok:true})})
 app.get('/api/lojas',async(req,res)=>{try{const l=await dbAll("SELECT nome FROM lojas ORDER BY id");res.json(l.map(x=>x.nome))}catch(e){res.status(500).json({erro:e.message})}})
 app.get('/api/funcionarios',auth,async(req,res)=>{try{res.json(await dbAll("SELECT * FROM funcionarios WHERE loja_id=? AND ativo=1 ORDER BY nome",[req.session.lojaId]))}catch(e){res.status(500).json({erro:e.message})}})
-app.post('/api/funcionarios',auth,async(req,res)=>{try{const{nome,cargo,hora_inicio,hora_fim,dias_semana}=req.body;if(!nome)return res.status(400).json({erro:'Nome obrigatorio'});const r=await dbRun("INSERT INTO funcionarios(loja_id,nome,cargo,hora_inicio,hora_fim,dias_semana,folgas_mes)VALUES(?,?,?,?,?,?,?)",[req.session.lojaId,nome,cargo||'Funcionario',hora_inicio||null,hora_fim||null,parseInt(dias_semana)||5,folgas_mes||'']);res.json({id:r.lastID,nome,cargo})}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/funcionarios/:id',auth,async(req,res)=>{try{const{nome,cargo,hora_inicio,hora_fim,dias_semana}=req.body;await dbRun("UPDATE funcionarios SET nome=?,cargo=?,hora_inicio=?,hora_fim=?,dias_semana=?,folgas_mes=? WHERE id=? AND loja_id=?",[nome,cargo,hora_inicio||null,hora_fim||null,parseInt(dias_semana)||5,folgas_mes||'',req.params.id,req.session.lojaId]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
+app.post('/api/funcionarios',auth,async(req,res)=>{try{const{nome,cargo,hora_inicio,hora_fim}=req.body;if(!nome)return res.status(400).json({erro:'Nome obrigatorio'});const r=await dbRun("INSERT INTO funcionarios(loja_id,nome,cargo,hora_inicio,hora_fim)VALUES(?,?,?,?,?)",[req.session.lojaId,nome,cargo||'Funcionario',hora_inicio||null,hora_fim||null]);res.json({id:r.lastID,nome,cargo})}catch(e){res.status(500).json({erro:e.message})}})
+app.put('/api/funcionarios/:id',auth,async(req,res)=>{try{const{nome,cargo,hora_inicio,hora_fim}=req.body;await dbRun("UPDATE funcionarios SET nome=?,cargo=?,hora_inicio=?,hora_fim=? WHERE id=? AND loja_id=?",[nome,cargo,hora_inicio||null,hora_fim||null,req.params.id,req.session.lojaId]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
 app.get('/api/registros',auth,async(req,res)=>{try{const{funcId,tipo,limite}=req.query;let sql="SELECT r.*,f.nome as funcNome,f.hora_inicio,f.hora_fim FROM registros r JOIN funcionarios f ON f.id=r.funcionario_id WHERE r.loja_id=?";const p=[req.session.lojaId];if(funcId){sql+=" AND r.funcionario_id=?";p.push(funcId)}if(tipo){sql+=" AND r.tipo=?";p.push(tipo)}sql+=" ORDER BY r.dt DESC LIMIT ?";p.push(parseInt(limite)||100);res.json(await dbAll(sql,p))}catch(e){res.status(500).json({erro:e.message})}})
-app.post('/api/registros',auth,async(req,res)=>{try{
-  const{funcionarioId,tipo,fotoBase64}=req.body
-  if(!funcionarioId||!tipo)return res.status(400).json({erro:'Dados incompletos'})
-  const func=await dbGet("SELECT * FROM funcionarios WHERE id=? AND loja_id=?",[funcionarioId,req.session.lojaId])
-  if(!func)return res.status(404).json({erro:'Funcionario nao encontrado'})
-  if(tipo==='entrada'&&func.hora_inicio){
-    const TOLERANCIA=5
-    const minutosAgora=agoraBrasilia()
-    const[hI,mI]=func.hora_inicio.split(':').map(Number)
-    const cedo=(hI*60+mI)-minutosAgora
-    if(cedo>TOLERANCIA)return res.status(403).json({bloqueado:true,mensagem:'Ainda nao iniciou sua jornada! Horario comeca as '+func.hora_inicio+'. Faltam '+(cedo-TOLERANCIA)+' minuto(s).'})
-  }
-  let fotoArquivo=null
-  if(fotoBase64){try{const buf=Buffer.from(fotoBase64.replace(/^data:image\/\w+;base64,/,''),'base64');const nm=Date.now()+'_f'+funcionarioId+'_'+tipo+'.jpg';fs.writeFileSync(path.join(FOTOS_DIR,nm),buf);fotoArquivo=nm}catch(e){console.error('Foto:',e.message)}}
-  const dt=new Date().toISOString()
-  const r=await dbRun("INSERT INTO registros(funcionario_id,loja_id,tipo,dt,foto_arquivo)VALUES(?,?,?,?,?)",[funcionarioId,req.session.lojaId,tipo,dt,fotoArquivo])
-  res.json({id:r.lastID,dt,fotoArquivo})
-}catch(e){res.status(500).json({erro:e.message})}})
+app.post('/api/registros',async(req,res)=>{
+  const t=req.headers['x-session'];if(!t||!sessions[t])return res.status(401).json({erro:'Nao autenticado'});const session=sessions[t]
+  try{
+    const{funcionarioId,tipo,fotoBase64}=req.body
+    if(!funcionarioId||!tipo)return res.status(400).json({erro:'Dados incompletos'})
+    const func=await dbGet("SELECT * FROM funcionarios WHERE id=? AND loja_id=?",[funcionarioId,session.lojaId])
+    if(!func)return res.status(404).json({erro:'Funcionario nao encontrado'})
+    if(tipo==='entrada'&&func.hora_inicio){
+      const agora=agoraBrasilia()
+      const[hI,mI]=func.hora_inicio.split(':').map(Number)
+      const cedo=(hI*60+mI)-agora
+      if(cedo>5)return res.status(403).json({bloqueado:true,mensagem:'Jornada comeca as '+func.hora_inicio+'. Faltam '+(cedo-5)+' minuto(s).'})
+    }
+    let fotoArquivo=null
+    if(fotoBase64){try{const buf=Buffer.from(fotoBase64.replace(/^data:image\/\w+;base64,/,''),'base64');const nm=Date.now()+'_'+funcionarioId+'_'+tipo+'.jpg';fs.writeFileSync(path.join(FOTOS_DIR,nm),buf);fotoArquivo=nm}catch(e){}}
+    const dt=new Date().toISOString()
+    const r=await dbRun("INSERT INTO registros(funcionario_id,loja_id,tipo,dt,foto_arquivo)VALUES(?,?,?,?,?)",[funcionarioId,session.lojaId,tipo,dt,fotoArquivo])
+    res.json({id:r.lastID,dt,fotoArquivo})
+  }catch(e){res.status(500).json({erro:e.message})}
+})
 app.get('/api/fotos',auth,async(req,res)=>{try{const{funcId}=req.query;let sql="SELECT r.id,r.dt,r.tipo,r.foto_arquivo,f.nome as funcNome FROM registros r JOIN funcionarios f ON f.id=r.funcionario_id WHERE r.loja_id=? AND r.foto_arquivo IS NOT NULL";const p=[req.session.lojaId];if(funcId){sql+=" AND r.funcionario_id=?";p.push(funcId)}sql+=" ORDER BY r.dt DESC LIMIT 200";res.json(await dbAll(sql,p))}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/fotos/:arquivo',(req,res)=>{const fp=path.join(FOTOS_DIR,path.basename(req.params.arquivo));if(!fs.existsSync(fp))return res.status(404).send('Nao encontrado');res.sendFile(fp)})
-app.delete('/api/fotos/antigas',auth,async(req,res)=>{try{const cfg=await dbGet("SELECT * FROM config WHERE loja_id=?",[req.session.lojaId]);const dias=cfg?cfg.dias_fotos:30;const lim=new Date(Date.now()-dias*24*60*60*1000).toISOString();const antig=await dbAll("SELECT foto_arquivo FROM registros WHERE loja_id=? AND foto_arquivo IS NOT NULL AND dt<?",[req.session.lojaId,lim]);let removidas=0;for(const r of antig){const fp=path.join(FOTOS_DIR,r.foto_arquivo);if(fs.existsSync(fp)){fs.unlinkSync(fp);removidas++}}await dbRun("UPDATE registros SET foto_arquivo=NULL WHERE loja_id=? AND foto_arquivo IS NOT NULL AND dt<?",[req.session.lojaId,lim]);res.json({removidas})}catch(e){res.status(500).json({erro:e.message})}})
+app.get('/fotos/:arquivo',(req,res)=>{const fp=path.join(FOTOS_DIR,path.basename(req.params.arquivo));if(!fs.existsSync(fp))return res.status(404).send('404');res.sendFile(fp)})
+app.delete('/api/fotos/antigas',auth,async(req,res)=>{try{const cfg=await dbGet("SELECT * FROM config WHERE loja_id=?",[req.session.lojaId]);const dias=cfg?cfg.dias_fotos:30;const lim=new Date(Date.now()-dias*24*60*60*1000).toISOString();const antig=await dbAll("SELECT foto_arquivo FROM registros WHERE loja_id=? AND foto_arquivo IS NOT NULL AND dt<?",[req.session.lojaId,lim]);let n=0;for(const r of antig){const fp=path.join(FOTOS_DIR,r.foto_arquivo);if(fs.existsSync(fp)){fs.unlinkSync(fp);n++}}await dbRun("UPDATE registros SET foto_arquivo=NULL WHERE loja_id=? AND foto_arquivo IS NOT NULL AND dt<?",[req.session.lojaId,lim]);res.json({removidas:n})}catch(e){res.status(500).json({erro:e.message})}})
 app.get('/api/config',auth,async(req,res)=>{try{const cfg=await dbGet("SELECT * FROM config WHERE loja_id=?",[req.session.lojaId]);res.json(cfg||{horas_diarias:8,tolerancia_min:10,dias_fotos:30})}catch(e){res.status(500).json({erro:e.message})}})
 app.put('/api/config',auth,async(req,res)=>{try{const{horas_diarias,tolerancia_min,dias_fotos}=req.body;await dbRun("INSERT INTO config(loja_id,horas_diarias,tolerancia_min,dias_fotos)VALUES(?,?,?,?)ON CONFLICT(loja_id)DO UPDATE SET horas_diarias=excluded.horas_diarias,tolerancia_min=excluded.tolerancia_min,dias_fotos=excluded.dias_fotos",[req.session.lojaId,horas_diarias,tolerancia_min,dias_fotos]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/senha',auth,async(req,res)=>{try{const{senha}=req.body;if(!senha||senha.length<4)return res.status(400).json({erro:'Senha muito curta'});await dbRun("UPDATE lojas SET senha=? WHERE id=?",[senha,req.session.lojaId]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/loja/renomear',auth,async(req,res)=>{try{const{nome}=req.body;if(!nome||nome.trim().length<2)return res.status(400).json({erro:'Nome muito curto'});await dbRun("UPDATE lojas SET nome=? WHERE id=?",[nome.trim(),req.session.lojaId]);res.json({ok:true,nome:nome.trim()})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/lojas/todas',auth,async(req,res)=>{if(req.session.role!=='master')return res.status(403).json({erro:'Acesso negado'});try{res.json(await dbAll("SELECT id,nome,senha FROM lojas ORDER BY id"))}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/lojas/:id/senha',auth,async(req,res)=>{if(req.session.role!=='master')return res.status(403).json({erro:'Acesso negado'});try{const{senha}=req.body;if(!senha||senha.length<4)return res.status(400).json({erro:'Senha muito curta'});await dbRun("UPDATE lojas SET senha=? WHERE id=?",[senha,req.params.id]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/escala',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;if(!funcId||!mes||!ano)return res.status(400).json({erro:'Parametros incompletos'});const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';res.json(await dbAll("SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data",[funcId,req.session.lojaId,inicio,fim]))}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/escala',auth,async(req,res)=>{try{const{funcionarioId,data,tipo,horas}=req.body;if(!funcionarioId||!data||!tipo)return res.status(400).json({erro:'Dados incompletos'});if(tipo==='folga'){await dbRun("DELETE FROM escala WHERE funcionario_id=? AND data=? AND loja_id=?",[funcionarioId,data,req.session.lojaId])}else{await dbRun("INSERT INTO escala(funcionario_id,loja_id,data,tipo,horas)VALUES(?,?,?,?,?)ON CONFLICT(funcionario_id,data)DO UPDATE SET tipo=excluded.tipo,horas=excluded.horas",[funcionarioId,req.session.lojaId,data,tipo,horas||8])}res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/escala/total',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';const r=await dbGet("SELECT SUM(horas) as totalHoras,COUNT(*) as totalDias FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=?",[funcId,req.session.lojaId,inicio,fim]);res.json({totalHoras:r.totalHoras||0,totalDias:r.totalDias||0})}catch(e){res.status(500).json({erro:e.message})}})
+app.put('/api/senha',auth,async(req,res)=>{try{const{senha}=req.body;if(!senha||senha.length<4)return res.status(400).json({erro:'Senha curta'});await dbRun("UPDATE lojas SET senha=? WHERE id=?",[senha,req.session.lojaId]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
+app.put('/api/loja/renomear',auth,async(req,res)=>{try{const{nome}=req.body;if(!nome||nome.trim().length<2)return res.status(400).json({erro:'Nome curto'});await dbRun("UPDATE lojas SET nome=? WHERE id=?",[nome.trim(),req.session.lojaId]);res.json({ok:true,nome:nome.trim()})}catch(e){res.status(500).json({erro:e.message})}})
+app.get('/api/lojas/todas',auth,async(req,res)=>{if(req.session.role!=='master')return res.status(403).json({erro:'Negado'});try{res.json(await dbAll("SELECT id,nome,senha FROM lojas ORDER BY id"))}catch(e){res.status(500).json({erro:e.message})}})
+app.put('/api/lojas/:id/senha',auth,async(req,res)=>{if(req.session.role!=='master')return res.status(403).json({erro:'Negado'});try{const{senha}=req.body;if(!senha||senha.length<4)return res.status(400).json({erro:'Senha curta'});await dbRun("UPDATE lojas SET senha=? WHERE id=?",[senha,req.params.id]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
+app.get('/api/folgas',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;res.json(await dbAll("SELECT * FROM folgas WHERE funcionario_id=? AND loja_id=? AND mes=? AND ano=?",[funcId,req.session.lojaId,mes,ano]))}catch(e){res.status(500).json({erro:e.message})}})
+app.post('/api/folgas',auth,async(req,res)=>{try{const{funcionarioId,mes,ano,dias}=req.body;await dbRun("DELETE FROM folgas WHERE funcionario_id=? AND loja_id=? AND mes=? AND ano=?",[funcionarioId,req.session.lojaId,mes,ano]);if(dias&&dias.length>0){for(const d of dias){await dbRun("INSERT OR IGNORE INTO folgas(funcionario_id,loja_id,mes,ano,dia)VALUES(?,?,?,?,?)",[funcionarioId,req.session.lojaId,mes,ano,d])}}res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
 app.get('/api/relatorio',auth,async(req,res)=>{try{
   const funcs=await dbAll("SELECT * FROM funcionarios WHERE loja_id=? AND ativo=1",[req.session.lojaId])
   const cfg=await dbGet("SELECT * FROM config WHERE loja_id=?",[req.session.lojaId])||{horas_diarias:8,tolerancia_min:10}
@@ -97,13 +100,4 @@ app.get('/api/relatorio',auth,async(req,res)=>{try{
   }
   res.json({funcionarios:result,config:cfg})
 }catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/escala',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;if(!funcId||!mes||!ano)return res.status(400).json({erro:'Parametros incompletos'});const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';res.json(await dbAll("SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data",[funcId,req.session.lojaId,inicio,fim]))}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/escala',auth,async(req,res)=>{try{const{funcionarioId,data,tipo,horas}=req.body;if(!funcionarioId||!data||!tipo)return res.status(400).json({erro:'Dados incompletos'});if(tipo==='folga'){await dbRun("DELETE FROM escala WHERE funcionario_id=? AND data=? AND loja_id=?",[funcionarioId,data,req.session.lojaId])}else{await dbRun("INSERT INTO escala(funcionario_id,loja_id,data,tipo,horas)VALUES(?,?,?,?,?)ON CONFLICT(funcionario_id,data)DO UPDATE SET tipo=excluded.tipo,horas=excluded.horas",[funcionarioId,req.session.lojaId,data,tipo,horas||8])}res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/escala/total',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';const r=await dbGet("SELECT SUM(horas) as totalHoras,COUNT(*) as totalDias FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=?",[funcId,req.session.lojaId,inicio,fim]);res.json({totalHoras:r.totalHoras||0,totalDias:r.totalDias||0})}catch(e){res.status(500).json({erro:e.message})}})
-
-app.get('/api/escala',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';res.json(await dbAll('SELECT * FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=? ORDER BY data',[funcId,req.session.lojaId,inicio,fim]))}catch(e){res.status(500).json({erro:e.message})}})
-app.put('/api/escala',auth,async(req,res)=>{try{const{funcionarioId,data,tipo,horas}=req.body;if(tipo==='folga'){await dbRun('DELETE FROM escala WHERE funcionario_id=? AND data=? AND loja_id=?',[funcionarioId,data,req.session.lojaId])}else{await dbRun('INSERT INTO escala(funcionario_id,loja_id,data,tipo,horas)VALUES(?,?,?,?,?)ON CONFLICT(funcionario_id,data)DO UPDATE SET tipo=excluded.tipo,horas=excluded.horas',[funcionarioId,req.session.lojaId,data,tipo,horas||8])}res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/escala/total',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;const inicio=ano+'-'+String(mes).padStart(2,'0')+'-01';const fim=ano+'-'+String(mes).padStart(2,'0')+'-31';const r=await dbGet('SELECT SUM(horas) as totalHoras,COUNT(*) as totalDias FROM escala WHERE funcionario_id=? AND loja_id=? AND data>=? AND data<=?',[funcId,req.session.lojaId,inicio,fim]);res.json({totalHoras:r.totalHoras||0,totalDias:r.totalDias||0})}catch(e){res.status(500).json({erro:e.message})}})
-app.get('/api/folgas',auth,async(req,res)=>{try{const{funcId,mes,ano}=req.query;res.json(await dbAll('SELECT * FROM folgas WHERE funcionario_id=? AND loja_id=? AND mes=? AND ano=?',[funcId,req.session.lojaId,mes,ano]))}catch(e){res.status(500).json({erro:e.message})}})
-app.post('/api/folgas',auth,async(req,res)=>{try{const{funcionarioId,mes,ano,dias}=req.body;await dbRun('DELETE FROM folgas WHERE funcionario_id=? AND loja_id=? AND mes=? AND ano=?',[funcionarioId,req.session.lojaId,mes,ano]);if(dias&&dias.length)for(const d of dias)await dbRun('INSERT OR IGNORE INTO folgas(funcionario_id,loja_id,mes,ano,dia)VALUES(?,?,?,?,?)',[funcionarioId,req.session.lojaId,mes,ano,d]);res.json({ok:true})}catch(e){res.status(500).json({erro:e.message})}})
-initDB().then(()=>{app.listen(PORT,'0.0.0.0',()=>{console.log('Sistema de Ponto rodando na porta '+PORT)})}).catch(e=>{console.error('Erro ao iniciar:',e);process.exit(1)})
+initDB().then(()=>{app.listen(PORT,'0.0.0.0',()=>{console.log('Sistema Ponto Shalom rodando na porta '+PORT)})}).catch(e=>{console.error('Erro:',e);process.exit(1)})
