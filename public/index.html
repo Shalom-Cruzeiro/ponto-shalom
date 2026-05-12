@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Grupo Shalom  Registro de Ponto</title>
+  <title>Grupo Shalom — Registro de Ponto</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css"/>
   <link rel="stylesheet" href="/css/style.css"/>
 </head>
@@ -20,7 +20,7 @@
     <label class="field-label">Selecionar loja</label>
     <select id="ll"></select>
     <label class="field-label">Senha do gerente</label>
-    <input type="password" id="ls" placeholder="" onkeydown="if(event.key==='Enter')login()"/>
+    <input type="password" id="ls" placeholder="••••••" onkeydown="if(event.key==='Enter')login()"/>
     <div id="le" class="alert alert-d" style="display:none;"><i class="ti ti-alert-circle"></i><span></span></div>
     <button class="btn btn-p btn-full" onclick="login()"><i class="ti ti-login"></i> Entrar</button>
     <div class="login-hint">Acesso exclusivo para gerentes autorizados.</div>
@@ -47,11 +47,10 @@
   <div class="main-content">
     <nav class="tab-bar">
       <button class="tab on" onclick="switchTab('reg',this)"><i class="ti ti-user-check"></i> Registrar</button>
-      <button class="tab" onclick="switchTab('hist',this)"><i class="ti ti-list-details"></i> Historico</button>
+      <button class="tab" onclick="switchTab('hist',this)"><i class="ti ti-list-details"></i> Histórico</button>
       <button class="tab" onclick="switchTab('fotos',this)"><i class="ti ti-camera"></i> Fotos</button>
-      <button class="tab" onclick="switchTab('rel',this)"><i class="ti ti-chart-bar"></i> Relatorio</button>
-      <button class="tab" onclick="switchTab('apuracao',this)"><i class="ti ti-calendar-stats"></i> Apuracao</button>
-      <button class="tab" onclick="switchTab('escala',this)"><i class="ti ti-calendar-event"></i> Escala</button>
+      <button class="tab" onclick="switchTab('rel',this)"><i class="ti ti-chart-bar"></i> Relatório</button>
+      <button class="tab" onclick="switchTab('apuracao',this)"><i class="ti ti-calendar-stats"></i> Apuração</button>
       <button class="tab" onclick="switchTab('cfg',this)"><i class="ti ti-settings"></i> Config</button>
     </nav>
 
@@ -62,10 +61,10 @@
           <div class="step-dot on"></div>
           <div class="step-dot"></div>
           <div class="step-dot"></div>
-          <span class="step-label" id="step-label-txt">Selecione o funcionario</span>
+          <span class="step-label" id="step-label-txt">Selecione o funcionário</span>
         </div>
         <div id="step1">
-          <label class="field-label">Funcionario</label>
+          <label class="field-label">Funcionário</label>
           <select id="sel-func" onchange="onFuncChange()"></select>
           <div id="jorn-bar" style="display:none;" class="jorn-bar">
             <div class="jorn-header"><span id="jorn-lbl">Jornada</span><span id="jorn-pct">0%</span></div>
@@ -77,7 +76,7 @@
             <button class="btn btn-s btn-tipo" onclick="selTipo('entrada')"><i class="ti ti-login"></i>Entrada</button>
             <button class="btn btn-w btn-tipo" onclick="selTipo('pausa')"><i class="ti ti-coffee"></i>Pausa</button>
             <button class="btn btn-w btn-tipo" onclick="selTipo('volta')"><i class="ti ti-arrow-back-up"></i>Volta</button>
-            <button class="btn btn-d btn-tipo" onclick="selTipo('saida')"><i class="ti ti-logout"></i>Saida</button>
+            <button class="btn btn-d btn-tipo" onclick="selTipo('saida')"><i class="ti ti-logout"></i>Saída</button>
           </div>
           <div id="s1-err" class="alert alert-d" style="display:none;"><i class="ti ti-alert-circle"></i><span></span></div>
         </div>
@@ -87,18 +86,18 @@
             <div style="font-size:13px;color:var(--muted);margin-top:3px;" id="s2-sub"></div>
           </div>
           <div class="cam-box" id="cam-box">
-            <div id="cam-ph" class="cam-ph"><i class="ti ti-camera-off"></i><span>Camera desligada</span></div>
+            <div id="cam-ph" class="cam-ph"><i class="ti ti-camera-off"></i><span>Câmera desligada</span></div>
             <video id="vid" autoplay playsinline></video>
             <canvas id="snap-canvas"></canvas>
           </div>
           <div class="cam-actions">
-            <button class="btn" id="btn-cam" onclick="toggleCam()"><i class="ti ti-camera"></i> Ativar camera</button>
+            <button class="btn" id="btn-cam" onclick="toggleCam()"><i class="ti ti-camera"></i> Ativar câmera</button>
             <button class="btn btn-p" id="btn-foto" onclick="tirarFoto()" style="display:none;"><i class="ti ti-camera"></i> Tirar foto</button>
             <button class="btn" onclick="voltarStep1()"><i class="ti ti-arrow-left"></i> Voltar</button>
           </div>
           <div id="foto-preview" style="display:none;">
             <div class="alert alert-k" id="foto-ok-msg"><i class="ti ti-circle-check"></i><span>Foto capturada! Confirme o registro.</span></div>
-            <img id="foto-img" class="foto-preview-img" alt="Foto de confirmacao"/>
+            <img id="foto-img" class="foto-preview-img" alt="Foto de confirmação"/>
             <div class="row gap-8">
               <button class="btn btn-p" onclick="confirmarRegistro()"><i class="ti ti-check"></i> Confirmar</button>
               <button class="btn" onclick="refazerFoto()"><i class="ti ti-refresh"></i> Refazer</button>
@@ -115,19 +114,19 @@
       </div>
     </div>
 
-    <!-- HISTORICO -->
+    <!-- HISTÓRICO -->
     <div id="pg-hist" class="pg">
       <div class="card">
         <div class="filter-row">
-          <select id="hf" onchange="renderHist()"><option value="">Todos os funcionarios</option></select>
+          <select id="hf" onchange="renderHist()"><option value="">Todos os funcionários</option></select>
           <select id="ht" onchange="renderHist()">
             <option value="">Todos os eventos</option>
             <option value="entrada">Entrada</option><option value="pausa">Pausa</option>
-            <option value="volta">Volta da pausa</option><option value="saida">Saida</option>
+            <option value="volta">Volta da pausa</option><option value="saida">Saída</option>
           </select>
         </div>
         <div class="table-wrap">
-          <table><thead><tr><th>Data/hora</th><th>Funcionario</th><th>Evento</th><th>Foto</th></tr></thead>
+          <table><thead><tr><th>Data/hora</th><th>Funcionário</th><th>Evento</th><th>Foto</th></tr></thead>
           <tbody id="hist-body"></tbody></table>
         </div>
       </div>
@@ -137,7 +136,7 @@
     <div id="pg-fotos" class="pg">
       <div class="card">
         <div class="fotos-header">
-          <div><div class="card-title">Fotos de confirmacao</div><div id="foto-info" style="font-size:12px;color:var(--muted);margin-top:2px;"></div></div>
+          <div><div class="card-title">Fotos de confirmação</div><div id="foto-info" style="font-size:12px;color:var(--muted);margin-top:2px;"></div></div>
           <div class="row gap-8">
             <select id="foto-ff" style="width:auto;margin-bottom:0;" onchange="renderFotos()"><option value="">Todos</option></select>
             <button class="btn btn-d btn-sm" onclick="limparFotosAntigas()"><i class="ti ti-trash"></i> Descartar antigas</button>
@@ -148,37 +147,37 @@
       <div id="foto-empty" class="empty-state" style="display:none;"><i class="ti ti-camera-off"></i>Nenhuma foto registrada ainda</div>
     </div>
 
-    <!-- RELATORIO -->
+    <!-- RELATÓRIO -->
     <div id="pg-rel" class="pg">
       <div id="rel-metrics" class="metrics-grid" style="margin-bottom:1rem;"></div>
       <div class="card">
         <div class="card-header">
-          <span class="card-title">Por funcionario</span>
+          <span class="card-title">Por funcionário</span>
           <button class="btn btn-i btn-sm" onclick="exportCSV()"><i class="ti ti-download"></i> Exportar CSV</button>
         </div>
         <div class="table-wrap">
-          <table><thead><tr><th>Funcionario</th><th>Entradas</th><th>Horas trab.</th><th>Jornada</th><th>Saldo</th><th>Fotos</th><th>Status</th></tr></thead>
+          <table><thead><tr><th>Funcionário</th><th>Entradas</th><th>Horas trab.</th><th>Jornada</th><th>Saldo</th><th>Fotos</th><th>Status</th></tr></thead>
           <tbody id="rel-body"></tbody></table>
         </div>
       </div>
     </div>
 
-    <!-- APURACAO MENSAL -->
+    <!-- APURAÇÃO MENSAL -->
     <div id="pg-apuracao" class="pg">
       <div class="card">
         <div class="card-header">
           <div class="apur-filtros">
-            <div><label class="field-label">Mes</label>
+            <div><label class="field-label">Mês</label>
               <select id="apur-mes" onchange="renderApuracao()">
                 <option value="1">Janeiro</option><option value="2">Fevereiro</option>
-                <option value="3">Marco</option><option value="4">Abril</option>
+                <option value="3">Março</option><option value="4">Abril</option>
                 <option value="5">Maio</option><option value="6">Junho</option>
                 <option value="7">Julho</option><option value="8">Agosto</option>
                 <option value="9">Setembro</option><option value="10">Outubro</option>
                 <option value="11">Novembro</option><option value="12">Dezembro</option>
               </select></div>
             <div><label class="field-label">Ano</label><select id="apur-ano" onchange="renderApuracao()"></select></div>
-            <div><label class="field-label">Funcionario</label>
+            <div><label class="field-label">Funcionário</label>
               <select id="apur-func" onchange="renderApuracao()"><option value="">Todos</option></select></div>
           </div>
           <div class="row gap-8">
@@ -189,90 +188,49 @@
       <div id="apur-metrics" class="metrics-grid" style="margin-bottom:1rem;"></div>
       <div class="card">
         <div class="table-wrap">
-          <table><thead><tr><th>Funcionario</th><th>Dias trab.</th><th>Horas trab.</th><th>Esperado</th><th>Saldo</th><th>Faltas</th><th>Status</th></tr></thead>
+          <table><thead><tr><th>Funcionário</th><th>Dias trab.</th><th>Horas trab.</th><th>Esperado</th><th>Extras</th><th>Faltas</th><th>Status</th></tr></thead>
           <tbody id="apur-body"></tbody></table>
         </div>
       </div>
       <div class="card" id="apur-detalhe-card" style="display:none;">
         <div class="card-header">
           <span class="card-title" id="apur-detalhe-titulo">Detalhe por dia</span>
-          <button class="btn btn-purple btn-sm" onclick="gerarPDFDetalhe()"><i class="ti ti-file-type-pdf"></i> PDF deste funcionario</button>
+          <button class="btn btn-purple btn-sm" onclick="gerarPDFDetalhe()"><i class="ti ti-file-type-pdf"></i> PDF deste funcionário</button>
         </div>
         <div class="table-wrap">
-          <table><thead><tr><th>Data</th><th>Dia</th><th>Entrada</th><th>Pausa</th><th>Volta</th><th>Saida</th><th>Horas</th><th>Status</th></tr></thead>
+          <table><thead><tr><th>Data</th><th>Dia</th><th>Entrada</th><th>Pausa</th><th>Volta</th><th>Saída</th><th>Horas</th><th>Status</th></tr></thead>
           <tbody id="apur-detalhe-body"></tbody></table>
         </div>
-      </div>
-    </div>
-
-    <!-- ESCALA DE TRABALHO -->
-    <div id="pg-escala" class="pg">
-      <div class="card">
-        <div class="card-header">
-          <div class="apur-filtros">
-            <div><label class="field-label">Funcionario</label>
-              <select id="escala-func" onchange="renderEscala()" style="min-width:200px;"></select></div>
-            <div><label class="field-label">Mes</label>
-              <select id="escala-mes" onchange="renderEscala()">
-                <option value="1">Janeiro</option><option value="2">Fevereiro</option>
-                <option value="3">Marco</option><option value="4">Abril</option>
-                <option value="5">Maio</option><option value="6">Junho</option>
-                <option value="7">Julho</option><option value="8">Agosto</option>
-                <option value="9">Setembro</option><option value="10">Outubro</option>
-                <option value="11">Novembro</option><option value="12">Dezembro</option>
-              </select></div>
-            <div><label class="field-label">Ano</label><select id="escala-ano" onchange="renderEscala()"></select></div>
-          </div>
-          <div id="escala-total" style="font-size:13px;font-weight:500;color:var(--blue);"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div id="escala-legenda" class="row gap-8" style="margin-bottom:14px;flex-wrap:wrap;">
-          <span style="font-size:12px;color:var(--muted);">Clique para alternar:</span>
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><span style="width:14px;height:14px;border-radius:3px;background:#EAF3DE;border:1px solid #3B6D11;display:inline-block;"></span> Trabalha (8h)</span>
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><span style="width:14px;height:14px;border-radius:3px;background:#E6F1FB;border:1px solid #185FA5;display:inline-block;"></span> Dom/feriado (6h)</span>
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><span style="width:14px;height:14px;border-radius:3px;background:#FCEBEB;border:1px solid #A32D2D;display:inline-block;"></span> Feriado (0h)</span>
-          <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;"><span style="width:14px;height:14px;border-radius:3px;background:var(--bg2);border:1px solid var(--border2);display:inline-block;"></span> Folga (0h)</span>
-        </div>
-        <div id="escala-cal" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;"></div>
       </div>
     </div>
 
     <!-- CONFIG -->
     <div id="pg-cfg" class="pg">
       <div class="card" style="max-width:580px;">
-        <div class="card-section-title">Configuracoes da loja</div>
+        <div class="card-section-title">Configurações da loja</div>
         <div class="g3">
-          <div><label class="field-label">Horas diarias</label><input type="number" id="cfg-h" value="8" min="4" max="12"/></div>
-          <div><label class="field-label">Tolerancia (min)</label><input type="number" id="cfg-t" value="10" min="0" max="60"/></div>
+          <div><label class="field-label">Horas diárias</label><input type="number" id="cfg-h" value="8" min="4" max="12"/></div>
+          <div><label class="field-label">Tolerância (min)</label><input type="number" id="cfg-t" value="10" min="0" max="60"/></div>
           <div><label class="field-label">Manter fotos (dias)</label><input type="number" id="cfg-dias" value="30" min="7" max="365"/></div>
         </div>
         <button class="btn btn-p" onclick="salvarCfg()"><i class="ti ti-check"></i> Salvar</button>
-        <div id="cfg-ok" class="alert alert-k" style="display:none;margin-top:10px;"><i class="ti ti-circle-check"></i><span>Configuracoes salvas!</span></div>
+        <div id="cfg-ok" class="alert alert-k" style="display:none;margin-top:10px;"><i class="ti ti-circle-check"></i><span>Configurações salvas!</span></div>
       </div>
       <div class="card" style="max-width:580px;">
-        <div class="card-section-title">Cadastrar funcionario</div>
+        <div class="card-section-title">Cadastrar funcionário</div>
         <div class="g2">
           <input type="text" id="novo-nome" placeholder="Nome completo"/>
           <input type="text" id="novo-cargo" placeholder="Cargo"/>
         </div>
         <div class="g2">
           <div>
-            <label class="field-label">Inicio da jornada</label>
+            <label class="field-label">Início da jornada</label>
             <input type="text" id="novo-inicio" placeholder="Ex: 14:00" style="margin-bottom:0;"/>
           </div>
           <div>
             <label class="field-label">Fim da jornada</label>
             <input type="text" id="novo-fim" placeholder="Ex: 22:00" style="margin-bottom:0;"/>
           </div>
-        </div>
-        <div style="margin-top:10px;">
-          <label class="field-label">Dias de folga no mes (ex: 3, 10, 17)</label>
-          <input type="text" id="novo-folgas" placeholder="Ex: 3, 10, 17, 24" style="margin-bottom:6px;"/>
-        </div>
-        <div style="margin-top:10px;">
-          <label class="field-label">Dias trabalhados por semana</label>
-          <input type="number" id="novo-dias-semana" placeholder="Ex: 5" min="1" max="7" style="max-width:120px;margin-bottom:0;"/>
         </div>
         <button class="btn btn-p" onclick="cadastrarFunc()" style="margin-top:12px;"><i class="ti ti-user-plus"></i> Cadastrar</button>
       </div>
@@ -295,14 +253,14 @@
       </div>
 
       <div class="card" style="max-width:760px;display:none;" id="card-todas-lojas">
-        <div class="card-section-title">Todas as lojas  senhas e nomes</div>
+        <div class="card-section-title">Todas as lojas — senhas e nomes</div>
         <div class="table-wrap">
           <table><thead><tr><th>Loja</th><th>Senha atual</th><th>Nova senha</th><th></th></tr></thead>
           <tbody id="todas-lojas-body"></tbody></table>
         </div>
       </div>
       <div class="card" style="max-width:760px;">
-        <div class="card-section-title">Funcionarios cadastrados</div>
+        <div class="card-section-title">Funcionários cadastrados</div>
         <div class="table-wrap">
           <table><thead><tr><th>Nome</th><th>Cargo</th><th>Jornada</th><th>Status</th><th></th></tr></thead>
           <tbody id="func-body"></tbody></table>
@@ -325,7 +283,7 @@
     <input type="text" id="edit-cargo"/>
     <div class="g2">
       <div>
-        <label class="field-label">Inicio da jornada</label>
+        <label class="field-label">Início da jornada</label>
         <input type="text" id="edit-inicio" placeholder="Ex: 14:00" style="margin-bottom:0;"/>
       </div>
       <div>
@@ -333,17 +291,9 @@
         <input type="text" id="edit-fim" placeholder="Ex: 22:00" style="margin-bottom:0;"/>
       </div>
     </div>
-    <div style="margin-top:10px;">
-      <label class="field-label">Dias de folga no mes (ex: 3, 10, 17)</label>
-      <input type="text" id="edit-folgas" placeholder="Ex: 3, 10, 17, 24" style="margin-bottom:6px;"/>
-    </div>
-    <div style="margin-top:10px;">
-      <label class="field-label">Dias trabalhados por semana</label>
-      <input type="number" id="edit-dias-semana" placeholder="Ex: 5" min="1" max="7" style="max-width:120px;margin-bottom:0;"/>
-    </div>
     <div style="font-size:12px;color:var(--muted);margin:10px 0 14px;">
       <i class="ti ti-info-circle" style="font-size:14px;vertical-align:middle;"></i>
-      O sistema bloqueara o registro com 5 minutos de antecedencia.
+      O sistema bloqueará o registro com 5 minutos de antecedência.
     </div>
     <div class="row gap-8">
       <button class="btn btn-p" onclick="salvarJornada()"><i class="ti ti-check"></i> Salvar</button>
@@ -355,36 +305,6 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
-
-  <!-- MODAL FOLGAS -->
-  <div id="modal-folgas" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center;">
-    <div class="card" style="width:420px;max-width:95vw;margin:0;">
-      <div class="card-section-title" id="folgas-titulo">Folgas do Mes</div>
-      <input type="hidden" id="folgas-func-id"/>
-      <div class="g2" style="margin-bottom:10px;">
-        <div><label class="field-label">Mes</label>
-          <select id="folgas-mes" onchange="carregarFolgas(document.getElementById('folgas-func-id').value)">
-            <option value="1">Janeiro</option><option value="2">Fevereiro</option>
-            <option value="3">Marco</option><option value="4">Abril</option>
-            <option value="5">Maio</option><option value="6">Junho</option>
-            <option value="7">Julho</option><option value="8">Agosto</option>
-            <option value="9">Setembro</option><option value="10">Outubro</option>
-            <option value="11">Novembro</option><option value="12">Dezembro</option>
-          </select></div>
-        <div><label class="field-label">Ano</label>
-          <select id="folgas-ano" onchange="carregarFolgas(document.getElementById('folgas-func-id').value)"></select></div>
-      </div>
-      <label class="field-label">Dias de folga (separados por virgula)</label>
-      <input type="text" id="folgas-dias" placeholder="Ex: 3, 10, 17, 24"/>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Digite os dias do mes que o funcionario tem folga. Domingos sao 6h, outros dias 8h, folgas 0h.</div>
-      <div id="folgas-ok" class="alert alert-k" style="display:none;margin-bottom:10px;"><i class="ti ti-circle-check"></i><span>Folgas salvas!</span></div>
-      <div class="row gap-8">
-        <button class="btn btn-p" onclick="salvarFolgas()"><i class="ti ti-check"></i> Salvar</button>
-        <button class="btn" onclick="fecharModalFolgas()"><i class="ti ti-x"></i> Fechar</button>
-      </div>
-    </div>
-  </div>
-
 <script src="/js/app.js"></script>
 </body>
 </html>
