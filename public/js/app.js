@@ -200,17 +200,30 @@ function renderPunchGrid() {
     const horaDe = {}; regsDoDia(f.id, ds).forEach(r => horaDe[r.tipo] = r.hora);
     const nx = proximoTipo(f.id, ds);
     const plano = planoDia(f, PUNCH.escMes, ds);
-    const turno = plano.on ? `${plano.ini}–${plano.fim}` : 'Folga';
-    const tiles = TIPOS.map(t => {
-      if (horaDe[t.k]) return `<div class="ptile done"><i class="ti ti-check"></i><span>${STEP_SHORT[t.k]}</span><b>${horaDe[t.k]}</b></div>`;
-      return `<button class="ptile ${t.k === nx ? 'next' : ''}" onclick="startCapture('${f.id}','${t.k}')"><i class="ti ${t.ic}"></i><span>${STEP_SHORT[t.k]}</span><b>Registrar</b></button>`;
+    const turno = plano.on ? `Turno ${plano.ini}–${plano.fim}` : 'Folga hoje';
+    const doneCount = TIPOS.filter(t => horaDe[t.k]).length;
+    const nodes = TIPOS.map((t, i) => {
+      const done = !!horaDe[t.k];
+      const lit = i > 0 && !!horaDe[TIPOS[i - 1].k];
+      const cls = done ? 'done' : (t.k === nx ? 'next' : 'todo');
+      const ic = done ? 'ti-check' : t.ic;
+      const time = done ? horaDe[t.k] : '—';
+      const inner = `<div class="sdot"><i class="ti ${ic}"></i></div><div class="slabel">${STEP_SHORT[t.k]}</div><div class="stime">${time}</div>`;
+      return done
+        ? `<div class="snode done ${lit ? 'lit' : ''}">${inner}</div>`
+        : `<button class="snode ${cls} ${lit ? 'lit' : ''}" onclick="startCapture('${f.id}','${t.k}')">${inner}</button>`;
     }).join('');
+    const cta = nx
+      ? `<button class="emp-cta" onclick="startCapture('${f.id}','${nx}')"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> Registrar ${STEP_SHORT[nx]}</button>`
+      : `<div class="emp-cta done"><i class="ti ti-circle-check"></i> Jornada concluída</div>`;
     return `<div class="emp">
       <div class="emp-head">
-        <div class="ava lg" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
-        <div style="min-width:0"><div class="nm">${esc(f.nome)}</div><div class="turno mono">${turno}</div></div>
+        <div class="ava xl" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
+        <div class="emp-id"><div class="nm">${esc(f.nome)}</div><div class="turno mono">${turno}</div></div>
+        <div class="emp-count">${doneCount}/4</div>
       </div>
-      <div class="ptiles">${tiles}</div>
+      <div class="stepper">${nodes}</div>
+      ${cta}
     </div>`;
   }).join('');
 }
