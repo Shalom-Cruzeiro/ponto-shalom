@@ -122,6 +122,23 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .pk-clock .t{font-size:30px;font-weight:700;line-height:1;letter-spacing:.5px}
 .pk-clock .d{font-size:11px;color:var(--mut);text-transform:capitalize}
 .pk-grid{flex:1;overflow:auto;padding:32px 24px;display:flex;flex-wrap:wrap;gap:24px;justify-content:center;align-content:flex-start}
+.pk-wrap{width:100%;max-width:1120px;display:flex;flex-direction:column;gap:20px}
+.pk-wrap.one{max-width:600px}
+.pk-wrap.one .emp{flex:none;width:100%;max-width:none}
+.pk-hint{text-align:center;font-size:15.5px;color:var(--ink2);font-weight:600;display:flex;align-items:center;justify-content:center;gap:8px}
+.pk-hint i{font-size:20px;color:var(--bl)}
+.emp-select{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+.pe-tile{display:flex;flex-direction:column;align-items:center;gap:11px;padding:22px 14px;border:1px solid var(--line);border-radius:18px;background:var(--card);cursor:pointer;transition:.12s;box-shadow:var(--sh)}
+.pe-tile:hover{border-color:var(--bl);transform:translateY(-3px);box-shadow:0 10px 28px rgba(16,30,54,.1)}
+.pe-tile:active{transform:translateY(0)}
+.pe-name{font-weight:700;font-size:15.5px;text-align:center;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.pe-dots{display:flex;gap:5px}
+.pe-dots .dot{width:8px;height:8px;border-radius:50%;background:var(--line)}
+.pe-dots .dot.on{background:var(--gr)}
+.pe-chip{font-size:11.5px;font-weight:700;color:var(--bl-d);background:var(--bl-soft);border:1px solid #d4e0fb;padding:4px 11px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
+.pe-chip i{font-size:14px}
+.pe-chip.done{color:#0a6e3e;background:var(--gr-soft);border-color:#bfe6cf}
+.back-list{align-self:flex-start}
 .emp{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:24px 28px 28px;display:flex;flex-direction:column;gap:24px;flex:1 1 480px;max-width:580px;box-shadow:0 4px 24px rgba(16,30,54,.07)}
 .emp-head{display:flex;align-items:center;gap:16px}
 .ava.xl{width:64px;height:64px;border-radius:19px;font-size:24px}

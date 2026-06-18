@@ -170,10 +170,10 @@ function renderPonto() {
     </div>`;
 }
 
-let PUNCH = { funcs: [], escMes: {}, regs: [], mk: null };
+let PUNCH = { funcs: [], escMes: {}, regs: [], mk: null, selected: null };
 async function openPunch() {
   const mk = monthKey(new Date());
-  PUNCH.mk = mk;
+  PUNCH.mk = mk; PUNCH.selected = null;
   try {
     PUNCH.funcs = await getFuncs(State.loja.id);
     PUNCH.escMes = await getEsc(State.loja.id, mk);
@@ -181,9 +181,11 @@ async function openPunch() {
   } catch (e) { toast('Não consegui carregar a loja: ' + e.message, 'err'); return; }
   document.getElementById('pk-loja').textContent = State.loja.nome;
   document.getElementById('punch-screen').classList.remove('hide');
-  tickClocks(); renderPunchGrid();
+  tickClocks(); renderPunch();
 }
 function closePunch() { document.getElementById('punch-screen').classList.add('hide'); }
+function selectFunc(id) { PUNCH.selected = id; renderPunch(); }
+function backToList() { PUNCH.selected = null; renderPunch(); }
 
 function regsDoDia(funcId, ds) { return PUNCH.regs.filter(r => r.funcId === funcId && r.data === ds).sort((a, b) => a.ts - b.ts); }
 function proximoTipo(funcId, ds) {
@@ -192,31 +194,63 @@ function proximoTipo(funcId, ds) {
   return null;
 }
 const STEP_SHORT = { entrada: 'Entrada', pausa: 'Pausa', volta: 'Retorno', saida: 'Saída' };
-function renderPunchGrid() {
+function renderPunch() {
+  if (!PUNCH.funcs.length) {
+    document.getElementById('pk-grid').innerHTML = `<div class="empty" style="width:100%"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`;
+    return;
+  }
+  if (PUNCH.selected && PUNCH.funcs.find(f => f.id === PUNCH.selected)) renderPunchIndividual();
+  else { PUNCH.selected = null; renderPunchSelect(); }
+}
+
+/* tela 1: selecionar o funcionário */
+function renderPunchSelect() {
   const ds = todayStr();
-  const g = document.getElementById('pk-grid');
-  if (!PUNCH.funcs.length) { g.innerHTML = `<div class="empty" style="width:100%"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`; return; }
-  g.innerHTML = PUNCH.funcs.map(f => {
+  const tiles = PUNCH.funcs.map(f => {
     const horaDe = {}; regsDoDia(f.id, ds).forEach(r => horaDe[r.tipo] = r.hora);
-    const nx = proximoTipo(f.id, ds);
-    const plano = planoDia(f, PUNCH.escMes, ds);
-    const turno = plano.on ? `Turno ${plano.ini}–${plano.fim}` : 'Folga hoje';
     const doneCount = TIPOS.filter(t => horaDe[t.k]).length;
-    const nodes = TIPOS.map((t, i) => {
-      const done = !!horaDe[t.k];
-      const lit = i > 0 && !!horaDe[TIPOS[i - 1].k];
-      const cls = done ? 'done' : (t.k === nx ? 'next' : 'todo');
-      const ic = done ? 'ti-check' : t.ic;
-      const time = done ? horaDe[t.k] : '—';
-      const inner = `<div class="sdot"><i class="ti ${ic}"></i></div><div class="slabel">${STEP_SHORT[t.k]}</div><div class="stime">${time}</div>`;
-      return done
-        ? `<div class="snode done ${lit ? 'lit' : ''}">${inner}</div>`
-        : `<button class="snode ${cls} ${lit ? 'lit' : ''}" onclick="startCapture('${f.id}','${t.k}')">${inner}</button>`;
-    }).join('');
-    const cta = nx
-      ? `<button class="emp-cta" onclick="startCapture('${f.id}','${nx}')"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> Registrar ${STEP_SHORT[nx]}</button>`
-      : `<div class="emp-cta done"><i class="ti ti-circle-check"></i> Jornada concluída</div>`;
-    return `<div class="emp">
+    const nx = proximoTipo(f.id, ds);
+    const dots = TIPOS.map(t => `<span class="dot ${horaDe[t.k] ? 'on' : ''}"></span>`).join('');
+    const chip = doneCount === 4
+      ? `<span class="pe-chip done"><i class="ti ti-check"></i> Concluído</span>`
+      : `<span class="pe-chip"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> ${STEP_SHORT[nx]}</span>`;
+    return `<button class="pe-tile" onclick="selectFunc('${f.id}')">
+      <div class="ava xl" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
+      <div class="pe-name">${esc(f.nome)}</div>
+      <div class="pe-dots">${dots}</div>
+      ${chip}
+    </button>`;
+  }).join('');
+  document.getElementById('pk-grid').innerHTML = `<div class="pk-wrap">
+    <div class="pk-hint"><i class="ti ti-hand-finger"></i> Toque no seu nome para registrar o ponto</div>
+    <div class="emp-select">${tiles}</div>
+  </div>`;
+}
+
+/* tela 2: painel individual com a trilha de pontos */
+function renderPunchIndividual() {
+  const ds = todayStr();
+  const f = PUNCH.funcs.find(x => x.id === PUNCH.selected);
+  const horaDe = {}; regsDoDia(f.id, ds).forEach(r => horaDe[r.tipo] = r.hora);
+  const nx = proximoTipo(f.id, ds);
+  const plano = planoDia(f, PUNCH.escMes, ds);
+  const turno = plano.on ? `Turno ${plano.ini}–${plano.fim}` : 'Folga hoje';
+  const doneCount = TIPOS.filter(t => horaDe[t.k]).length;
+  const nodes = TIPOS.map((t, i) => {
+    const done = !!horaDe[t.k];
+    const lit = i > 0 && !!horaDe[TIPOS[i - 1].k];
+    const cls = done ? 'done' : (t.k === nx ? 'next' : 'todo');
+    const inner = `<div class="sdot"><i class="ti ${done ? 'ti-check' : t.ic}"></i></div><div class="slabel">${STEP_SHORT[t.k]}</div><div class="stime">${done ? horaDe[t.k] : '—'}</div>`;
+    return done
+      ? `<div class="snode done ${lit ? 'lit' : ''}">${inner}</div>`
+      : `<button class="snode ${cls} ${lit ? 'lit' : ''}" onclick="startCapture('${f.id}','${t.k}')">${inner}</button>`;
+  }).join('');
+  const cta = nx
+    ? `<button class="emp-cta" onclick="startCapture('${f.id}','${nx}')"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> Registrar ${STEP_SHORT[nx]}</button>`
+    : `<div class="emp-cta done"><i class="ti ti-circle-check"></i> Jornada concluída</div>`;
+  document.getElementById('pk-grid').innerHTML = `<div class="pk-wrap one">
+    <button class="btn back-list" onclick="backToList()"><i class="ti ti-arrow-left"></i> Trocar de funcionário</button>
+    <div class="emp">
       <div class="emp-head">
         <div class="ava xl" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
         <div class="emp-id"><div class="nm">${esc(f.nome)}</div><div class="turno mono">${turno}</div></div>
@@ -224,8 +258,8 @@ function renderPunchGrid() {
       </div>
       <div class="stepper">${nodes}</div>
       ${cta}
-    </div>`;
-  }).join('');
+    </div>
+  </div>`;
 }
 
 /* ---------- captura ---------- */
@@ -315,13 +349,15 @@ async function confirmPunch(blob) {
   try { r = await fetch('/api/punch', { method: 'POST', headers: { 'x-token': SESS.token }, body: fd }).then(x => x.json()); }
   catch (e) { toast('Falha ao registrar', 'err'); if (btn) btn.disabled = false; return; }
   if (r.blocked) { closeCapture(); openCapBlock(r); return; }
-  if (r.jaRegistrado) { toast((STEP_SHORT[r.tipo] || 'Ponto') + ' já registrado', 'warn'); closeCapture(); renderPunchGrid(); return; }
+  if (r.jaRegistrado) { toast((STEP_SHORT[r.tipo] || 'Ponto') + ' já registrado', 'warn'); closeCapture(); renderPunch(); return; }
   if (r.ok) {
     PUNCH.regs.push(r.reg);
     const f = PUNCH.funcs.find(x => x.id === CAM.funcId);
     toast(`${TIPO_LBL[r.reg.tipo]} registrada · ${f.nome.split(' ')[0]} · ${r.reg.hora}`, 'ok');
     if (r.ocorrencia) setTimeout(() => toast('Saída sem entrada — ocorrência gerada automaticamente', 'warn'), 1300);
-    closeCapture(); renderPunchGrid();
+    closeCapture(); renderPunch();
+    // volta sozinho para a lista, pronto para o próximo funcionário
+    setTimeout(() => { if (PUNCH.selected === CAM.funcId && document.getElementById('modal-root').innerHTML === '') backToList(); }, 2200);
   } else { toast(r.error ? ('Erro: ' + r.error) : 'Não foi possível registrar', 'err'); if (btn) btn.disabled = false; }
 }
 function closeCapture() {
