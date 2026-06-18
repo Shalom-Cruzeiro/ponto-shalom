@@ -1,927 +1,765 @@
-// Estado global
-let TOKEN = localStorage.getItem('ponto_token') || null
-let SESSION = JSON.parse(localStorage.getItem('ponto_session') || 'null')
-let FUNCS = []
-let CONFIG = { horas_diarias: 8, tolerancia_min: 10, dias_fotos: 30 }
-let camStream = null
-let pendente = { funcId: null, tipo: null, fNome: null }
-let fotoDataUrl = null
+/* ============================================================
+   Sistema de Ponto — Grupo Shalom (cliente)
+   Conversa com a API do server.js. Sessão guardada no navegador.
+============================================================ */
 
-// Helpers
-const el = id => document.getElementById(id)
-const fmtH = m => { const h = Math.floor(m / 60), mn = Math.round(m % 60); return h + 'h' + (mn ? mn.toString().padStart(2, '0') : '') }
-const fmtDT = d => new Date(d).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-const ini = n => n.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase()
+/* ---------- sessão ---------- */
+let SESS = null;
+try { SESS = JSON.parse(localStorage.getItem('ponto_sess') || 'null'); } catch (e) { SESS = null; }
+function saveSess() { localStorage.setItem('ponto_sess', JSON.stringify(SESS)); }
+function clearSess() { SESS = null; localStorage.removeItem('ponto_sess'); }
 
+/* ---------- API ---------- */
 async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json', 'x-session': TOKEN || '' } }
-  if (body) opts.body = JSON.stringify(body)
-  const res = await fetch('/api' + path, opts)
-  const data = await res.json()
-  if (!res.ok) {
-    const err = new Error(data.erro || 'Erro na requisição')
-    err.data = data
-    err.status = res.status
-    throw err
-  }
-  return data
+  const opt = { method, headers: {} };
+  if (SESS) opt.headers['x-token'] = SESS.token;
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const r = await fetch(path, opt);
+  if (r.status === 401) { clearSess(); showLogin(); toast('Sessão expirada, entre novamente', 'warn'); throw new Error('401'); }
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('http_' + r.status)); }
+  return r.json();
+}
+const getFuncs = async (lj) => (await api('GET', `/api/data/func:${lj}`)) || [];
+const setFuncs = (lj, v) => api('PUT', `/api/data/func:${lj}`, v);
+const getEsc = async (lj, mk) => (await api('GET', `/api/data/escala:${lj}:${mk}`)) || {};
+const setEsc = (lj, mk, v) => api('PUT', `/api/data/escala:${lj}:${mk}`, v);
+const getRegs = async (lj, mk) => (await api('GET', `/api/data/reg:${lj}:${mk}`)) || [];
+const getOcor = async (lj) => (await api('GET', `/api/data/ocor:${lj}`)) || [];
+const setOcor = (lj, v) => api('PUT', `/api/data/ocor:${lj}`, v);
+
+/* ============================================================
+   CONSTANTES / HELPERS
+============================================================ */
+const AV = ['#2B59D6','#0F9D58','#C77700','#7C3AED','#D6342C','#0891B2','#DB2777','#475569','#65A30D','#E11D48'];
+const avColor = s => AV[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
+const initials = n => n.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+const TIPOS = [
+  { k: 'entrada', lbl: 'Entrada', ic: 'ti-login-2' },
+  { k: 'pausa', lbl: 'Início pausa', ic: 'ti-cup' },
+  { k: 'volta', lbl: 'Fim pausa', ic: 'ti-arrow-back-up' },
+  { k: 'saida', lbl: 'Saída', ic: 'ti-logout-2' },
+];
+const TIPO_LBL = Object.fromEntries(TIPOS.map(t => [t.k, t.lbl]));
+const DOW = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const OCOR_TIPOS = ['Atraso', 'Falta', 'Hora extra', 'Ajuste de horário', 'Abono', 'Esquecimento de ponto', 'Atestado', 'Outro'];
+
+const toMin = t => { if (!t) return 0; const [a, b] = t.split(':').map(Number); return a * 60 + b; };
+const fmtMin = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const fmtH = m => { const h = Math.floor(m / 60), mm = m % 60; return mm ? `${h}h${String(mm).padStart(2, '0')}` : `${h}h`; };
+function dur(p) { if (!p || !p.on || !p.ini || !p.fim) return 0; let d = toMin(p.fim) - toMin(p.ini); if (d < 0) d += 1440; return Math.max(0, d - (p.interv || 0)); }
+const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const monthKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+const todayStr = () => ymd(new Date());
+const capWord = s => s.charAt(0).toUpperCase() + s.slice(1);
+const fmtDateLong = d => capWord(d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }));
+const fmtTime = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const esc = s => (s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const escapeOpt = s => (s || '').replace(/</g, '&lt;');
+
+function toast(msg, kind = 'ok') {
+  const t = document.getElementById('toast');
+  t.className = 'toast show ' + kind;
+  t.querySelector('i').className = 'ti ' + (kind === 'ok' ? 'ti-check' : kind === 'warn' ? 'ti-alert-triangle' : 'ti-x');
+  t.querySelector('span').textContent = msg;
+  clearTimeout(t._t); t._t = setTimeout(() => t.className = 'toast ' + kind, 2800);
 }
 
-// Relógio
-setInterval(() => {
-  if (SESSION) el('hdr-hora').textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}, 1000)
+/* ============================================================
+   STATE
+============================================================ */
+const State = { loja: null, role: 'gerente', cfg: null, tab: 'ponto',
+  calMonth: new Date(), calFunc: null, repMonth: new Date(), repFunc: null, repMode: 'func' };
 
-// Init - carregar lojas
-async function initLogin() {
-  const lojas = await api('GET', '/lojas')
-  const ll = el('ll')
-  ll.innerHTML = '<option value="">— Selecione a loja —</option>'
-  lojas.forEach(l => { const o = document.createElement('option'); o.value = l; o.textContent = l; ll.appendChild(o) })
-  if (TOKEN && SESSION) {
-    showMain()
-  }
+function planoDia(func, escMes, dateStr) {
+  if (escMes && escMes[func.id] && escMes[func.id][dateStr]) return escMes[func.id][dateStr];
+  const dow = parseYmd(dateStr).getDay();
+  return (func.padrao && func.padrao[dow]) ? func.padrao[dow] : { on: false };
 }
 
-async function login() {
-  const loja = el('ll').value, senha = el('ls').value
-  if (!loja) { showErr('le', 'Selecione uma loja.'); return }
+/* ============================================================
+   LOGIN
+============================================================ */
+async function bootLogin() {
+  const sel = document.getElementById('lg-loja');
   try {
-    const data = await api('POST', '/login', { loja, senha })
-    TOKEN = data.token
-    SESSION = { lojaNome: data.lojaNome, role: data.role }
-    localStorage.setItem('ponto_token', TOKEN)
-    localStorage.setItem('ponto_session', JSON.stringify(SESSION))
-    el('le').style.display = 'none'
-    showMain()
+    const lojas = await fetch('/api/lojas').then(r => r.json());
+    sel.innerHTML = lojas.map(l => `<option value="${l.id}">${esc(l.nome)}</option>`).join('');
+  } catch (e) { sel.innerHTML = '<option>erro ao carregar</option>'; }
+}
+async function doLogin() {
+  const lojaId = document.getElementById('lg-loja').value;
+  const senha = document.getElementById('lg-senha').value;
+  const err = document.getElementById('lg-err');
+  try {
+    const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lojaId, senha }) });
+    if (!r.ok) { err.textContent = 'Senha incorreta'; err.classList.remove('hide'); return; }
+    SESS = await r.json(); saveSess();
+    document.getElementById('lg-senha').value = '';
+    err.classList.add('hide');
+    enterApp();
+  } catch (e) { err.textContent = 'Falha de conexão'; err.classList.remove('hide'); }
+}
+function enterApp() {
+  State.loja = SESS.loja; State.role = SESS.role; State.cfg = SESS.config;
+  document.getElementById('login').classList.add('hide');
+  document.getElementById('app').classList.remove('hide');
+  document.getElementById('tb-loja').textContent = SESS.loja.nome;
+  document.getElementById('tb-role').textContent = SESS.role === 'master' ? 'Acesso master' : 'Gerente da loja';
+  buildTabs(); go('ponto');
+}
+function showLogin() {
+  document.getElementById('app').classList.add('hide');
+  document.getElementById('punch-screen').classList.add('hide');
+  document.getElementById('login').classList.remove('hide');
+}
+function doLogout() { clearSess(); showLogin(); }
+
+/* ============================================================
+   TABS / ROUTER
+============================================================ */
+const TABS = [
+  { k: 'ponto', lbl: 'Ponto', ic: 'ti-fingerprint' },
+  { k: 'escala', lbl: 'Escala', ic: 'ti-calendar-month' },
+  { k: 'func', lbl: 'Funcionários', ic: 'ti-users' },
+  { k: 'ocor', lbl: 'Ocorrências', ic: 'ti-file-description' },
+  { k: 'rel', lbl: 'Relatórios', ic: 'ti-report-analytics' },
+  { k: 'cfg', lbl: 'Config', ic: 'ti-settings' },
+];
+function buildTabs() {
+  document.getElementById('tabs').innerHTML = TABS.map(t =>
+    `<button class="tab" data-k="${t.k}" onclick="go('${t.k}')"><i class="ti ${t.ic}"></i>${t.lbl}</button>`).join('');
+}
+function go(k) {
+  State.tab = k;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.k === k));
+  ({ ponto: renderPonto, escala: renderEscala, func: renderFunc, ocor: renderOcor, rel: renderRel, cfg: renderCfg }[k])();
+}
+
+/* ============================================================
+   CLOCK
+============================================================ */
+function tickClocks() {
+  const now = new Date();
+  const tb = document.getElementById('tb-time');
+  if (tb) {
+    tb.textContent = fmtTime(now);
+    document.getElementById('tb-date').textContent = capWord(now.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: 'short' }));
+  }
+  const pt = document.getElementById('pk-time');
+  if (pt && !document.getElementById('punch-screen').classList.contains('hide')) {
+    pt.textContent = now.toLocaleTimeString('pt-BR');
+    document.getElementById('pk-date').textContent = fmtDateLong(now);
+  }
+}
+setInterval(tickClocks, 1000);
+
+/* ============================================================
+   TAB: PONTO
+============================================================ */
+function renderPonto() {
+  document.getElementById('page').innerHTML = `
+    <div class="ph"><div><h2>Registro de ponto</h2><p>Abra a tela de registro para os funcionários baterem o ponto com foto.</p></div></div>
+    <div class="card cpad" style="text-align:center">
+      <div class="logo" style="margin:6px auto 16px"><i class="ti ti-fingerprint"></i></div>
+      <h3 style="font-size:17px;margin-bottom:6px">Tela de registro</h3>
+      <p class="mut" style="max-width:420px;margin:0 auto 18px">Modo cheio, compacto, um toque para registrar. A tolerância de ${State.cfg.tolerancia} min é aplicada na entrada.</p>
+      <button class="btn p" style="padding:12px 22px" onclick="openPunch()"><i class="ti ti-player-play"></i> Abrir tela de registro</button>
+    </div>`;
+}
+
+let PUNCH = { funcs: [], escMes: {}, regs: [], mk: null };
+async function openPunch() {
+  const mk = monthKey(new Date());
+  PUNCH.mk = mk;
+  try {
+    PUNCH.funcs = await getFuncs(State.loja.id);
+    PUNCH.escMes = await getEsc(State.loja.id, mk);
+    PUNCH.regs = await getRegs(State.loja.id, mk);
+  } catch (e) { return; }
+  document.getElementById('pk-loja').textContent = State.loja.nome;
+  document.getElementById('punch-screen').classList.remove('hide');
+  tickClocks(); renderPunchGrid();
+}
+function closePunch() { document.getElementById('punch-screen').classList.add('hide'); }
+
+function regsDoDia(funcId, ds) { return PUNCH.regs.filter(r => r.funcId === funcId && r.data === ds).sort((a, b) => a.ts - b.ts); }
+function proximoTipo(funcId, ds) {
+  const done = regsDoDia(funcId, ds).map(r => r.tipo);
+  for (const t of TIPOS) if (!done.includes(t.k)) return t.k;
+  return null;
+}
+function renderPunchGrid() {
+  const ds = todayStr();
+  const g = document.getElementById('pk-grid');
+  if (!PUNCH.funcs.length) { g.innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`; return; }
+  g.innerHTML = PUNCH.funcs.map(f => {
+    const nx = proximoTipo(f.id, ds);
+    const plano = planoDia(f, PUNCH.escMes, ds);
+    const sub = nx ? ('Próximo: ' + TIPO_LBL[nx]) : 'Dia concluído';
+    const ic = nx ? (TIPOS.find(t => t.k === nx).ic) : 'ti-circle-check';
+    const turno = plano.on ? `${plano.ini}–${plano.fim}` : 'Folga';
+    return `<button class="emp" ${nx ? '' : 'disabled style=opacity:.55'} onclick="startCapture('${f.id}')">
+      <div class="row" style="gap:9px">
+        <div class="ava" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
+        <div style="min-width:0"><div class="nm">${esc(f.nome)}</div><div class="nx mono">${turno}</div></div>
+      </div>
+      <div class="nx"><i class="ti ${ic}" style="vertical-align:-2px"></i> ${sub}</div>
+    </button>`;
+  }).join('');
+}
+
+/* ---------- captura ---------- */
+let CAM = { stream: null, funcId: null, tipo: null };
+async function startCapture(funcId) {
+  let prep;
+  try { prep = await api('POST', '/api/punch/prepare', { funcId }); } catch (e) { return; }
+  if (prep.blocked) { openCapBlock(prep); return; }
+  if (prep.concluido || !prep.tipo) { toast('Dia já concluído', 'warn'); return; }
+  CAM = { stream: null, funcId, tipo: prep.tipo };
+  openCapUI(prep);
+}
+function openCapBlock(prep) {
+  const nome = (prep.nome || '').split(' ')[0];
+  document.getElementById('modal-root').innerHTML = `<div class="ovl" onclick="if(event.target===this)closeModal()">
+    <div class="cap-card"><div class="cap-body" style="text-align:center;padding:26px 22px">
+      <div class="logo" style="margin:0 auto 14px;background:linear-gradient(135deg,var(--am),#e8a93a)"><i class="ti ti-coffee"></i></div>
+      <h3 style="font-size:17px;margin-bottom:8px">Ainda não iniciou sua jornada</h3>
+      <p class="mut" style="margin:0 0 4px">Aproveite seu período de descanso, <b>${esc(nome)}</b>!</p>
+      <p class="mut" style="margin:0 0 18px">Seu horário começa às <b class="mono">${prep.ini}</b>. Faltam <b>${prep.faltam}</b> min.</p>
+      <button class="btn full" onclick="closeModal()">Entendi</button>
+    </div></div></div>`;
+}
+function openCapUI(prep) {
+  const t = TIPOS.find(x => x.k === prep.tipo);
+  const plano = prep.plano || {};
+  document.getElementById('modal-root').innerHTML = `<div id="cap"><div class="cap-card">
+    <div class="cap-head">
+      <div class="ava" style="background:${avColor(prep.nome)}">${initials(prep.nome)}</div>
+      <div style="min-width:0"><div style="font-weight:700;font-size:14px">${esc(prep.nome)}</div>
+        <div class="mut" style="font-size:12px"><i class="ti ${t.ic}" style="vertical-align:-2px"></i> ${t.lbl}</div></div>
+      <button class="iconbtn" style="margin-left:auto" onclick="closeCapture()"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="cap-body">
+      <div class="camwrap" id="camwrap">
+        <video id="cam-video" autoplay playsinline muted></video>
+        <div class="ph-ph hide" id="cam-fallback"></div>
+      </div>
+      <input id="cam-file" type="file" accept="image/*" capture="user" class="hide" onchange="onFilePhoto(event)"/>
+      <div class="row" style="justify-content:space-between">
+        <span class="mut mono" style="font-size:12px">${plano.on ? plano.ini + '–' + plano.fim : 'Sem turno previsto'}</span>
+        <span class="mono" style="font-weight:700;font-size:15px">${fmtTime(new Date())}</span>
+      </div>
+      <button class="btn g full" id="cap-confirm" disabled><i class="ti ti-camera"></i> Capturar e registrar</button>
+    </div>
+  </div></div>`;
+  startCam();
+}
+async function startCam() {
+  const v = document.getElementById('cam-video'), fb = document.getElementById('cam-fallback'), btn = document.getElementById('cap-confirm');
+  try {
+    CAM.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 480 }, audio: false });
+    v.srcObject = CAM.stream;
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-camera"></i> Capturar e registrar';
+    btn.onclick = takeAndConfirm;
   } catch (e) {
-    showErr('le', e.message)
+    v.classList.add('hide'); fb.classList.remove('hide');
+    fb.innerHTML = '<i class="ti ti-camera-off" style="font-size:26px;display:block;margin-bottom:6px"></i>Câmera indisponível aqui.<br>Toque para usar a câmera do aparelho.';
+    fb.onclick = () => document.getElementById('cam-file').click();
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-camera-plus"></i> Tirar foto';
+    btn.onclick = () => document.getElementById('cam-file').click();
   }
 }
-
-async function logout() {
-  try { await api('POST', '/logout') } catch (_) {}
-  TOKEN = null; SESSION = null
-  localStorage.removeItem('ponto_token')
-  localStorage.removeItem('ponto_session')
-  stopCam()
-  el('screen-login').style.display = 'flex'
-  el('screen-main').style.display = 'none'
-  el('ls').value = ''
+function drawToBlob(src, w, h) {
+  const max = 480, scale = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.round(w * scale); c.height = Math.round(h * scale);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+  return new Promise(r => c.toBlob(r, 'image/jpeg', 0.7));
+}
+async function takeAndConfirm() {
+  const v = document.getElementById('cam-video');
+  const blob = await drawToBlob(v, v.videoWidth || 480, v.videoHeight || 360);
+  confirmPunch(blob);
+}
+function onFilePhoto(ev) {
+  const file = ev.target.files[0]; if (!file) return;
+  const img = new Image();
+  img.onload = async () => { const blob = await drawToBlob(img, img.width, img.height); confirmPunch(blob); };
+  img.src = URL.createObjectURL(file);
+}
+async function confirmPunch(blob) {
+  const btn = document.getElementById('cap-confirm'); if (btn) { btn.disabled = true; btn.innerHTML = 'Registrando...'; }
+  const fd = new FormData(); fd.append('funcId', CAM.funcId); if (blob) fd.append('foto', blob, 'p.jpg');
+  let r;
+  try { r = await fetch('/api/punch', { method: 'POST', headers: { 'x-token': SESS.token }, body: fd }).then(x => x.json()); }
+  catch (e) { toast('Falha ao registrar', 'err'); if (btn) btn.disabled = false; return; }
+  if (r.blocked) { closeCapture(); openCapBlock(r); return; }
+  if (r.ok) {
+    PUNCH.regs.push(r.reg);
+    const f = PUNCH.funcs.find(x => x.id === CAM.funcId);
+    toast(`${TIPO_LBL[r.reg.tipo]} registrada · ${f.nome.split(' ')[0]} · ${r.reg.hora}`, 'ok');
+    closeCapture(); renderPunchGrid();
+  } else { toast('Não foi possível registrar', 'err'); if (btn) btn.disabled = false; }
+}
+function closeCapture() {
+  if (CAM.stream) { CAM.stream.getTracks().forEach(t => t.stop()); CAM.stream = null; }
+  document.getElementById('modal-root').innerHTML = '';
 }
 
-async function showMain() {
-  el('screen-login').style.display = 'none'
-  el('screen-main').style.display = 'block'
-  el('hdr-loja').textContent = SESSION.lojaNome
-  el('hdr-role').textContent = SESSION.role === 'master' ? 'Master' : 'Gerente'
-  await loadConfig()
-  await loadFuncs()
-  renderHist()
-  renderRel()
-  renderFotos()
+/* ============================================================
+   TAB: ESCALA
+============================================================ */
+async function renderEscala() {
+  const funcs = await getFuncs(State.loja.id);
+  if (!funcs.length) { noFuncs('Cadastre funcionários para montar a escala.'); return; }
+  if (!State.calFunc || !funcs.find(f => f.id === State.calFunc)) State.calFunc = funcs[0].id;
+  const mk = monthKey(State.calMonth);
+  const escMes = await getEsc(State.loja.id, mk);
+  const func = funcs.find(f => f.id === State.calFunc);
+  const total = mesPrevisto(func, escMes, State.calMonth);
+  const meta = State.cfg.metaHoras * 60;
+  const ok = total >= meta;
+
+  document.getElementById('page').innerHTML = `
+    <div class="ph">
+      <div><h2>Escala mensal</h2><p>Programe os turnos. Clique num dia para ajustar. As horas previstas são somadas automaticamente.</p></div>
+      <div class="row">
+        <select class="inp" style="width:auto" onchange="State.calFunc=this.value;renderEscala()">
+          ${funcs.map(f => `<option value="${f.id}" ${f.id === State.calFunc ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="card cpad" style="margin-bottom:14px">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <button class="btn sm" onclick="shiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
+          <div style="font-weight:700;font-size:15px;min-width:150px;text-align:center">${capWord(State.calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</div>
+          <button class="btn sm" onclick="shiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
+        </div>
+        <div class="row">
+          <button class="btn sm" onclick="aplicarPadrao()"><i class="ti ti-wand"></i> Aplicar padrão do funcionário</button>
+          <button class="btn sm dgr" onclick="limparMes()"><i class="ti ti-eraser"></i> Limpar mês</button>
+        </div>
+      </div>
+    </div>
+    <div class="card cpad" style="margin-bottom:14px">
+      <div class="hsum">
+        <div><div class="lbl">Horas previstas no mês</div><div class="big mono" style="color:${ok ? 'var(--gr)' : 'var(--am)'}">${fmtH(total)}</div></div>
+        <div style="flex:1"></div>
+        ${ok ? `<span class="badge bd-gr"><i class="ti ti-circle-check"></i> Meta de ${State.cfg.metaHoras}h atingida</span>`
+             : `<span class="badge bd-am"><i class="ti ti-alert-triangle"></i> Abaixo de ${State.cfg.metaHoras}h — faltam ${fmtH(meta - total)}</span>`}
+      </div>
+    </div>
+    <div class="card cpad">
+      <div class="cal" style="margin-bottom:6px">${DOW.map(d => `<div class="dow">${d}</div>`).join('')}</div>
+      <div class="cal" id="cal-grid"></div>
+    </div>`;
+  drawCalendar(func, escMes);
 }
-
-async function loadConfig() {
-  try {
-    CONFIG = await api('GET', '/config')
-    el('cfg-h').value = CONFIG.horas_diarias
-    el('cfg-t').value = CONFIG.tolerancia_min
-    el('cfg-dias').value = CONFIG.dias_fotos
-  } catch (_) {}
+function shiftMonth(n) { State.calMonth = new Date(State.calMonth.getFullYear(), State.calMonth.getMonth() + n, 1); renderEscala(); }
+function mesPrevisto(func, escMes, monthDate) {
+  const y = monthDate.getFullYear(), m = monthDate.getMonth(), days = new Date(y, m + 1, 0).getDate();
+  let total = 0;
+  for (let d = 1; d <= days; d++) total += dur(planoDia(func, escMes, `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`));
+  return total;
 }
-
-async function loadFuncs() {
-  FUNCS = await api('GET', '/funcionarios')
-
-  // sel-func (registrar ponto)
-  const sf = el('sel-func')
-  sf.innerHTML = '<option value="">— Selecione o funcionário —</option>'
-  FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; sf.appendChild(o) })
-
-  // hf (filtro histórico)
-  const hf = el('hf')
-  if (hf) {
-    hf.innerHTML = '<option value="">Todos os funcionários</option>'
-    FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; hf.appendChild(o) })
+function drawCalendar(func, escMes) {
+  const y = State.calMonth.getFullYear(), m = State.calMonth.getMonth();
+  const first = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate(), ds = todayStr();
+  let html = '';
+  for (let i = 0; i < first; i++) html += '<div class="cell empty"></div>';
+  for (let d = 1; d <= days; d++) {
+    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const p = planoDia(func, escMes, dateStr);
+    html += `<div class="cell ${!p.on ? 'off' : ''} ${dateStr === ds ? 'today' : ''}" onclick="editDia('${dateStr}')">
+      <div class="dn">${d}</div>
+      ${p.on ? `<div class="sh">${p.ini}<br>${p.fim}</div>` : `<div class="fg">Folga</div>`}</div>`;
   }
-
-  // foto-ff (filtro fotos)
-  const ff = el('foto-ff')
-  if (ff) {
-    ff.innerHTML = '<option value="">Todos</option>'
-    FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; ff.appendChild(o) })
+  document.getElementById('cal-grid').innerHTML = html;
+}
+let _segOn = null;
+async function editDia(dateStr) {
+  const funcs = await getFuncs(State.loja.id);
+  const func = funcs.find(f => f.id === State.calFunc);
+  const escMes = await getEsc(State.loja.id, monthKey(State.calMonth));
+  const p = planoDia(func, escMes, dateStr);
+  _segOn = null;
+  const date = parseYmd(dateStr);
+  openModal(`Jornada · ${date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}`, `
+    <div class="row" style="gap:8px">
+      <div class="seg" id="seg-on">
+        <button class="${p.on ? 'on' : ''}" onclick="segOn(true)">Trabalha</button>
+        <button class="${!p.on ? 'on' : ''}" onclick="segOn(false)">Folga</button>
+      </div>
+      <span class="mut" style="font-size:12px">${esc(func.nome)}</span>
+    </div>
+    <div id="jfields" class="${p.on ? '' : 'hide'}" style="display:flex;flex-direction:column;gap:13px">
+      <div class="row" style="gap:12px">
+        <div style="flex:1"><label class="fl">Entrada</label><input id="j-ini" class="inp" type="time" value="${p.ini || '14:00'}"></div>
+        <div style="flex:1"><label class="fl">Saída</label><input id="j-fim" class="inp" type="time" value="${p.fim || '22:00'}"></div>
+      </div>
+      <div><label class="fl">Intervalo (min)</label><input id="j-interv" class="inp" type="number" min="0" step="5" value="${p.interv != null ? p.interv : State.cfg.intervaloPadrao}"></div>
+    </div>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar dia', cls: 'p', fn: `saveDia('${dateStr}')` }]);
+}
+function segOn(v) {
+  _segOn = v;
+  document.querySelectorAll('#seg-on button').forEach((b, i) => b.classList.toggle('on', (i === 0) === v));
+  document.getElementById('jfields').classList.toggle('hide', !v);
+}
+async function saveDia(dateStr) {
+  const mk = monthKey(State.calMonth);
+  const escMes = await getEsc(State.loja.id, mk);
+  const on = _segOn !== null ? _segOn : true;
+  escMes[State.calFunc] = escMes[State.calFunc] || {};
+  escMes[State.calFunc][dateStr] = on
+    ? { on: true, ini: document.getElementById('j-ini').value, fim: document.getElementById('j-fim').value, interv: +document.getElementById('j-interv').value || 0 }
+    : { on: false };
+  await setEsc(State.loja.id, mk, escMes);
+  _segOn = null; closeModal(); renderEscala(); toast('Jornada do dia salva', 'ok');
+}
+async function aplicarPadrao() {
+  const mk = monthKey(State.calMonth);
+  const funcs = await getFuncs(State.loja.id);
+  const func = funcs.find(f => f.id === State.calFunc);
+  const escMes = await getEsc(State.loja.id, mk);
+  const y = State.calMonth.getFullYear(), m = State.calMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
+  escMes[State.calFunc] = escMes[State.calFunc] || {};
+  for (let d = 1; d <= days; d++) {
+    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const dow = parseYmd(dateStr).getDay();
+    escMes[State.calFunc][dateStr] = (func.padrao && func.padrao[dow]) ? { ...func.padrao[dow] } : { on: false };
   }
-
-  renderFuncBody()
+  await setEsc(State.loja.id, mk, escMes);
+  renderEscala(); toast('Padrão semanal aplicado ao mês', 'ok');
+}
+async function limparMes() {
+  const mk = monthKey(State.calMonth);
+  const escMes = await getEsc(State.loja.id, mk);
+  delete escMes[State.calFunc];
+  await setEsc(State.loja.id, mk, escMes);
+  renderEscala(); toast('Escala do mês limpa', 'ok');
 }
 
-// --- Registrar ponto ---
-async function onFuncChange() {
-  await updJorn()
+/* ============================================================
+   TAB: FUNCIONÁRIOS
+============================================================ */
+async function renderFunc() {
+  const funcs = await getFuncs(State.loja.id);
+  document.getElementById('page').innerHTML = `
+    <div class="ph"><div><h2>Funcionários</h2><p>${funcs.length} cadastrado(s) nesta loja.</p></div>
+      <div class="row"><button class="btn p" onclick="novoFunc()"><i class="ti ti-user-plus"></i> Novo funcionário</button></div></div>
+    <div class="card">
+      ${funcs.length ? `<table class="tbl"><thead><tr><th>Funcionário</th><th>Cargo</th><th>Jornada padrão</th><th>Prev. mês</th><th></th></tr></thead><tbody>
+        ${funcs.map(f => {
+          const prev = mesPrevisto(f, {}, new Date());
+          const dias = (f.padrao || []).filter(d => d && d.on).length;
+          const ref = (f.padrao || []).find(d => d && d.on);
+          return `<tr>
+            <td><div class="row" style="gap:9px"><div class="ava" style="background:${avColor(f.nome)};width:32px;height:32px;border-radius:9px;font-size:12px">${initials(f.nome)}</div><b>${esc(f.nome)}</b></div></td>
+            <td class="mut">${esc(f.cargo || '—')}</td>
+            <td class="mut" style="font-size:12px">${dias} dia(s)/sem · ${ref ? ref.ini + '–' + ref.fim : '—'}</td>
+            <td class="mono">${fmtH(prev)}</td>
+            <td style="text-align:right;white-space:nowrap">
+              <button class="btn sm" onclick="novoFunc('${f.id}')"><i class="ti ti-edit"></i></button>
+              <button class="btn sm dgr" onclick="delFunc('${f.id}')"><i class="ti ti-trash"></i></button></td>
+          </tr>`;
+        }).join('')}
+      </tbody></table>` : `<div class="empty"><i class="ti ti-users"></i>Nenhum funcionário ainda.<br>Clique em "Novo funcionário".</div>`}
+    </div>`;
+}
+let _padrao = null;
+function defPadrao() { return [{ on: false }, ...[1, 2, 3, 4, 5, 6].map(() => ({ on: true, ini: '14:00', fim: '22:00', interv: 60 }))]; }
+function defShift(f, key) {
+  const base = f && (f.padrao || []).find(d => d && d.on);
+  const d = { ini: '14:00', fim: '22:00', interv: 60 };
+  return base ? (base[key] != null ? base[key] : d[key]) : d[key];
+}
+async function novoFunc(id) {
+  const funcs = await getFuncs(State.loja.id);
+  const f = id ? funcs.find(x => x.id === id) : null;
+  _padrao = f ? JSON.parse(JSON.stringify(f.padrao || defPadrao())) : defPadrao();
+  openModal(f ? 'Editar funcionário' : 'Novo funcionário', `
+    <div><label class="fl">Nome</label><input id="f-nome" class="inp" value="${f ? esc(f.nome) : ''}" placeholder="Nome completo"></div>
+    <div><label class="fl">Cargo (opcional)</label><input id="f-cargo" class="inp" value="${f ? esc(f.cargo || '') : ''}" placeholder="Ex.: Vendedor(a)"></div>
+    <div>
+      <label class="fl">Jornada padrão semanal</label>
+      <div class="row" style="gap:8px;margin-bottom:10px">
+        <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="p-ini" class="inp" type="time" value="${defShift(f, 'ini')}"></div>
+        <div style="flex:1"><span class="mut" style="font-size:11px">Saída</span><input id="p-fim" class="inp" type="time" value="${defShift(f, 'fim')}"></div>
+        <div style="width:90px"><span class="mut" style="font-size:11px">Interv.</span><input id="p-interv" class="inp" type="number" min="0" step="5" value="${defShift(f, 'interv')}"></div>
+      </div>
+      <div class="row" id="dow-row" style="gap:6px">
+        ${DOW.map((d, i) => `<button type="button" class="btn sm ${_padrao[i] && _padrao[i].on ? 'p' : ''}" data-d="${i}" onclick="toggleDow(${i})" style="flex:1;min-width:40px">${d}</button>`).join('')}
+      </div>
+      <p class="mut" style="font-size:11.5px;margin:8px 0 0">Selecione os dias de trabalho. Dias específicos você ajusta depois na aba Escala.</p>
+    </div>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: f ? 'Salvar' : 'Cadastrar', cls: 'p', fn: `saveFunc(${f ? `'${f.id}'` : 'null'})` }]);
+}
+function toggleDow(i) {
+  _padrao[i] = _padrao[i] && _padrao[i].on ? { on: false } : { on: true };
+  document.querySelector(`#dow-row button[data-d="${i}"]`).classList.toggle('p', _padrao[i].on);
+}
+async function saveFunc(id) {
+  const nome = document.getElementById('f-nome').value.trim();
+  if (!nome) { toast('Informe o nome', 'warn'); return; }
+  const ini = document.getElementById('p-ini').value, fim = document.getElementById('p-fim').value, interv = +document.getElementById('p-interv').value || 0;
+  const padrao = _padrao.map(d => d && d.on ? { on: true, ini, fim, interv } : { on: false });
+  const cargo = document.getElementById('f-cargo').value.trim();
+  const funcs = await getFuncs(State.loja.id);
+  if (id) { const f = funcs.find(x => x.id === id); f.nome = nome; f.cargo = cargo; f.padrao = padrao; }
+  else funcs.push({ id: 'f' + Date.now().toString(36), nome, cargo, padrao });
+  await setFuncs(State.loja.id, funcs);
+  closeModal(); renderFunc(); toast(id ? 'Funcionário atualizado' : 'Funcionário cadastrado', 'ok');
+}
+async function delFunc(id) {
+  if (!confirm('Remover este funcionário? Os registros já lançados são mantidos.')) return;
+  let funcs = await getFuncs(State.loja.id);
+  funcs = funcs.filter(f => f.id !== id);
+  await setFuncs(State.loja.id, funcs);
+  renderFunc(); toast('Funcionário removido', 'ok');
 }
 
-async function updJorn() {
-  const fid = el('sel-func').value, jb = el('jorn-bar')
-  if (!fid) { jb.style.display = 'none'; return }
-  try {
-    const regs = await api('GET', `/registros?funcId=${fid}&limite=100`)
-    const hoje = new Date().toDateString()
-    const regsHoje = regs.filter(r => new Date(r.dt).toDateString() === hoje)
-    const entrada = regsHoje.find(r => r.tipo === 'entrada')
-    const saida = regsHoje.find(r => r.tipo === 'saida')
-    const pausa = regsHoje.find(r => r.tipo === 'pausa')
-    const volta = regsHoje.find(r => r.tipo === 'volta')
-    jb.style.display = 'block'
-    const je = el('jorn-extra')
-    if (!entrada) {
-      el('jorn-lbl').textContent = 'Sem registro hoje'
-      el('jorn-pct').textContent = ''
-      el('jorn-fill').style.width = '0%'
-      je.style.display = 'none'
-      return
-    }
-    if (entrada && !saida) {
-      el('jorn-lbl').textContent = 'Jornada em andamento...'
-      el('jorn-pct').textContent = ''
-      el('jorn-fill').style.width = '30%'
-      el('jorn-fill').style.background = '#185FA5'
-      je.style.display = 'flex'
-      je.className = 'alert alert-i'
-      je.innerHTML = '<i class="ti ti-clock-play"></i><span>Horas calculadas após registrar a saída</span>'
-      return
-    }
-    // Entrada e saída registradas — calcular horas reais
-    let pausaMins = 0
-    if (pausa && volta) pausaMins = (new Date(volta.dt) - new Date(pausa.dt)) / 60000
-    const minT = Math.max(0, (new Date(saida.dt) - new Date(entrada.dt)) / 60000 - pausaMins)
-    const maxM = CONFIG.horas_diarias * 60
-    const pct = Math.min(100, Math.round((minT / maxM) * 100))
-    const extra = Math.max(0, minT - maxM)
-    el('jorn-lbl').textContent = 'Jornada: ' + fmtH(Math.round(minT)) + ' / ' + CONFIG.horas_diarias + 'h'
-    el('jorn-pct').textContent = pct + '%'
-    el('jorn-fill').style.width = pct + '%'
-    el('jorn-fill').style.background = extra > CONFIG.tolerancia_min ? '#E24B4A' : pct >= 80 ? '#639922' : '#185FA5'
-    if (extra > CONFIG.tolerancia_min) {
-      je.style.display = 'flex'
-      je.className = 'alert alert-w'
-      je.innerHTML = '<i class="ti ti-alert-triangle"></i><span>Hora extra: +' + fmtH(Math.round(extra)) + '</span>'
-    } else {
-      je.style.display = 'none'
-    }
-  } catch (_) {}
+/* ============================================================
+   TAB: OCORRÊNCIAS
+============================================================ */
+async function renderOcor() {
+  const funcs = await getFuncs(State.loja.id);
+  const ocs = (await getOcor(State.loja.id)).sort((a, b) => b.criadoEm - a.criadoEm);
+  document.getElementById('page').innerHTML = `
+    <div class="ph"><div><h2>Ocorrências de ponto</h2><p>Registre e gere o formulário para situações fora do previsto (atrasos, ajustes, abonos…).</p></div>
+      <div class="row"><button class="btn p" onclick="novaOcor()" ${funcs.length ? '' : 'disabled'}><i class="ti ti-file-plus"></i> Nova ocorrência</button></div></div>
+    <div class="card">
+      ${ocs.length ? `<table class="tbl"><thead><tr><th>Data</th><th>Funcionário</th><th>Tipo</th><th>Horário</th><th>Motivo</th><th></th></tr></thead><tbody>
+        ${ocs.map(o => { const f = funcs.find(x => x.id === o.funcId); return `<tr>
+          <td class="mono">${o.data.split('-').reverse().join('/')}</td>
+          <td><b>${f ? esc(f.nome) : '—'}</b></td>
+          <td>${badgeOcor(o.tipo)}</td>
+          <td class="mono mut">${o.de ? `${o.de}${o.ate ? '–' + o.ate : ''}` : '—'}</td>
+          <td class="mut" style="max-width:240px">${esc(o.motivo || '—')}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn sm" onclick="printOcor('${o.id}')"><i class="ti ti-printer"></i> Formulário</button>
+            <button class="btn sm dgr" onclick="delOcor('${o.id}')"><i class="ti ti-trash"></i></button></td>
+        </tr>`; }).join('')}
+      </tbody></table>` : `<div class="empty"><i class="ti ti-file-description"></i>Nenhuma ocorrência registrada.</div>`}
+    </div>`;
+}
+function badgeOcor(t) {
+  const c = { 'Falta': 'bd-rd', 'Atraso': 'bd-am', 'Hora extra': 'bd-bl', 'Atestado': 'bd-gr' }[t] || 'bd-gy';
+  return `<span class="badge ${c}">${t}</span>`;
+}
+async function novaOcor() {
+  const funcs = await getFuncs(State.loja.id);
+  openModal('Nova ocorrência', `
+    <div><label class="fl">Funcionário</label><select id="o-func" class="inp">${funcs.map(f => `<option value="${f.id}">${escapeOpt(f.nome)}</option>`).join('')}</select></div>
+    <div class="row" style="gap:12px">
+      <div style="flex:1"><label class="fl">Data</label><input id="o-data" class="inp" type="date" value="${todayStr()}"></div>
+      <div style="flex:1"><label class="fl">Tipo</label><select id="o-tipo" class="inp">${OCOR_TIPOS.map(t => `<option>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="row" style="gap:12px">
+      <div style="flex:1"><label class="fl">De (opcional)</label><input id="o-de" class="inp" type="time"></div>
+      <div style="flex:1"><label class="fl">Até (opcional)</label><input id="o-ate" class="inp" type="time"></div>
+    </div>
+    <div><label class="fl">Motivo</label><input id="o-motivo" class="inp" placeholder="Ex.: trânsito, troca de turno combinada…"></div>
+    <div><label class="fl">Observações</label><textarea id="o-obs" class="inp" rows="2" placeholder="Detalhes adicionais"></textarea></div>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar ocorrência', cls: 'p', fn: 'saveOcor()' }]);
+}
+async function saveOcor() {
+  const o = { id: 'o' + Date.now().toString(36), funcId: document.getElementById('o-func').value,
+    data: document.getElementById('o-data').value, tipo: document.getElementById('o-tipo').value,
+    de: document.getElementById('o-de').value, ate: document.getElementById('o-ate').value,
+    motivo: document.getElementById('o-motivo').value.trim(), obs: document.getElementById('o-obs').value.trim(), criadoEm: Date.now() };
+  const ocs = await getOcor(State.loja.id); ocs.push(o); await setOcor(State.loja.id, ocs);
+  closeModal(); renderOcor(); toast('Ocorrência registrada', 'ok');
+}
+async function delOcor(id) {
+  if (!confirm('Remover esta ocorrência?')) return;
+  let ocs = await getOcor(State.loja.id); ocs = ocs.filter(o => o.id !== id); await setOcor(State.loja.id, ocs);
+  renderOcor(); toast('Ocorrência removida', 'ok');
+}
+async function printOcor(id) {
+  const funcs = await getFuncs(State.loja.id);
+  const o = (await getOcor(State.loja.id)).find(x => x.id === id);
+  const f = funcs.find(x => x.id === o.funcId);
+  const w = window.open('', '_blank');
+  w.document.write(`<html><head><title>Ocorrência de Ponto</title><meta charset="utf-8">
+  <style>body{font-family:Arial,sans-serif;color:#0F1C2E;max-width:720px;margin:30px auto;padding:0 24px}
+  h1{font-size:18px;border-bottom:2px solid #2B59D6;padding-bottom:10px}.r{display:flex;gap:24px;margin:10px 0}
+  .fld{flex:1}.fld span{display:block;font-size:11px;color:#7A8AA0;text-transform:uppercase;letter-spacing:.05em}
+  .fld b{font-size:15px}.box{border:1px solid #E6EAF1;border-radius:8px;padding:12px;margin-top:6px;min-height:50px}
+  .sign{display:flex;gap:40px;margin-top:60px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px;font-size:12px}</style></head><body>
+  <h1>Formulário de Ocorrência de Ponto</h1>
+  <div class="r"><div class="fld"><span>Loja</span><b>${esc(State.loja.nome)}</b></div><div class="fld"><span>Data</span><b>${o.data.split('-').reverse().join('/')}</b></div></div>
+  <div class="r"><div class="fld"><span>Funcionário</span><b>${esc(f ? f.nome : '—')}</b></div><div class="fld"><span>Cargo</span><b>${esc(f && f.cargo || '—')}</b></div></div>
+  <div class="r"><div class="fld"><span>Tipo</span><b>${o.tipo}</b></div><div class="fld"><span>Horário</span><b>${o.de ? o.de + (o.ate ? ' às ' + o.ate : '') : '—'}</b></div></div>
+  <div><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Motivo</span><div class="box">${esc(o.motivo || '')}</div></div>
+  <div style="margin-top:14px"><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Observações</span><div class="box">${esc(o.obs || '')}</div></div>
+  <div class="sign"><div>Assinatura do funcionário</div><div>Assinatura do gerente</div></div>
+  <p style="text-align:center;color:#7A8AA0;font-size:11px;margin-top:40px">Grupo Shalom · gerado em ${new Date().toLocaleString('pt-BR')}</p>
+  <script>window.onload=function(){window.print()}<\/script></body></html>`);
+  w.document.close();
 }
 
-function selTipo(tipo) {
-  const fid = el('sel-func').value
-  if (!fid) { showErr('s1-err', 'Selecione um funcionário.'); return }
-  el('s1-err').style.display = 'none'
-  const func = FUNCS.find(f => f.id == fid)
-  const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
-  pendente = { funcId: fid, tipo, fNome: func.nome }
-  el('s2-title').textContent = 'Confirmação — ' + L[tipo]
-  el('s2-sub').textContent = func.nome + ' · ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  el('step1').style.display = 'none'
-  el('step2').style.display = 'block'
-  setStepDots(1)
-  fotoDataUrl = null
-  el('foto-preview').style.display = 'none'
-  el('btn-cam').style.display = 'inline-flex'
-  el('btn-foto').style.display = 'none'
-  el('s2-err').style.display = 'none'
-  stopCam()
-}
-
-function voltarStep1() {
-  stopCam()
-  el('step2').style.display = 'none'
-  el('step1').style.display = 'block'
-  setStepDots(0)
-}
-
-async function toggleCam() {
-  if (camStream) { stopCam(); return }
-  try {
-    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 800 }, height: { ideal: 600 } }, audio: false })
-    const vid = el('vid')
-    vid.srcObject = camStream
-    vid.style.display = 'block'
-    el('cam-ph').style.display = 'none'
-    el('btn-cam').innerHTML = '<i class="ti ti-camera-off"></i> Desligar'
-    el('btn-foto').style.display = 'inline-flex'
-    el('s2-err').style.display = 'none'
-  } catch (e) {
-    showErr('s2-err', 'Câmera não disponível. Você pode confirmar sem foto.')
-    adicionarBtnSemFoto()
-  }
-}
-
-function adicionarBtnSemFoto() {
-  if (el('btn-semfoto')) return
-  const b = document.createElement('button')
-  b.className = 'btn'; b.id = 'btn-semfoto'
-  b.innerHTML = '<i class="ti ti-user-check"></i> Confirmar sem foto'
-  b.onclick = () => confirmarRegistro()
-  el('cam-actions').appendChild(b)
-}
-
-function stopCam() {
-  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null }
-  const vid = el('vid')
-  vid.style.display = 'none'; vid.srcObject = null
-  el('cam-ph').style.display = 'flex'
-  el('btn-cam').innerHTML = '<i class="ti ti-camera"></i> Ativar câmera'
-  el('btn-foto').style.display = 'none'
-}
-
-function tirarFoto() {
-  const vid = el('vid'), cv = el('snap-canvas')
-  cv.width = vid.videoWidth || 800; cv.height = vid.videoHeight || 600
-  const ctx = cv.getContext('2d')
-  // Espelhar horizontalmente (corrige câmera frontal)
-  ctx.save(); ctx.scale(-1, 1); ctx.drawImage(vid, -cv.width, 0); ctx.restore()
-  fotoDataUrl = cv.toDataURL('image/jpeg', 0.7)
-  el('foto-img').src = fotoDataUrl
-  el('foto-ok-msg').textContent = 'Foto capturada! Verifique e confirme o registro.'
-  el('foto-preview').style.display = 'block'
-  el('btn-foto').style.display = 'none'
-  stopCam()
-}
-
-function refazerFoto() {
-  fotoDataUrl = null
-  el('foto-preview').style.display = 'none'
-  el('btn-cam').style.display = 'inline-flex'
-  toggleCam()
-}
-
-async function confirmarRegistro() {
-  try {
-    await api('POST', '/registros', { funcionarioId: pendente.funcId, tipo: pendente.tipo, fotoBase64: fotoDataUrl || null })
-    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
-    el('s3-msg').textContent = L[pendente.tipo] + ' registrada!'
-    el('s3-sub').textContent = pendente.fNome + ' · ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) + (fotoDataUrl ? ' · com foto' : ' · sem foto')
-    el('step2').style.display = 'none'
-    el('step3').style.display = 'block'
-    setStepDots(2)
-    stopCam()
-    renderHist(); renderRel()
-  } catch (e) {
-    if (e.status === 403 && e.data && e.data.bloqueado) {
-      const errEl = el('s2-err')
-      errEl.innerHTML = `<i class="ti ti-clock-pause" style="font-size:24px;flex-shrink:0;"></i><span>${e.data.mensagem}</span>`
-      errEl.className = 'alert alert-w'
-      errEl.style.display = 'flex'
-    } else {
-      const errEl = el('s2-err')
-      errEl.innerHTML = `<i class="ti ti-alert-circle"></i><span>Erro ao registrar: ${e.message}</span>`
-      errEl.className = 'alert alert-d'
-      errEl.style.display = 'flex'
-    }
-  }
-}
-
-function novoRegistro() {
-  el('step3').style.display = 'none'
-  el('step1').style.display = 'block'
-  el('sel-func').value = ''
-  el('jorn-bar').style.display = 'none'
-  fotoDataUrl = null; setStepDots(0)
-  const bsf = el('btn-semfoto'); if (bsf) bsf.remove()
-}
-
-// --- Histórico ---
-async function renderHist() {
-  const tb = el('hist-body'); if (!tb) return
-  const ff = el('hf') ? el('hf').value : ''
-  const ft = el('ht') ? el('ht').value : ''
-  try {
-    let url = '/registros?limite=80'
-    if (ff) url += '&funcId=' + ff
-    if (ft) url += '&tipo=' + ft
-    const regs = await api('GET', url)
-    if (!regs.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted);">Nenhum registro ainda</td></tr>'; return }
-    const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
-    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
-    tb.innerHTML = regs.map(r => `<tr>
-      <td style="white-space:nowrap;">${fmtDT(r.dt)}</td>
-      <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.funcNome)}</div>${r.funcNome}</div></td>
-      <td><span class="badge ${BC[r.tipo]}">${L[r.tipo]}</span></td>
-      <td>${r.foto_arquivo ? '<span class="badge bk"><i class="ti ti-camera"></i> sim</span>' : '<span class="badge bg">não</span>'}</td>
-    </tr>`).join('')
-  } catch (e) { tb.innerHTML = '<tr><td colspan="4" style="padding:12px;color:var(--muted);">Erro ao carregar</td></tr>' }
-}
-
-// --- Fotos ---
-async function renderFotos() {
-  const grid = el('foto-grid'), empty = el('foto-empty'); if (!grid) return
-  const ff = el('foto-ff') ? el('foto-ff').value : ''
-  try {
-    let url = '/fotos?'
-    if (ff) url += 'funcId=' + ff
-    const fotos = await api('GET', url)
-    el('foto-info').textContent = fotos.length + ' foto(s) armazenadas'
-    if (!fotos.length) { grid.innerHTML = ''; empty.style.display = 'block'; return }
-    empty.style.display = 'none'
-    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
-    const BC = { entrada: 'bk', saida: 'bd', pausa: 'bw', volta: 'bi' }
-    grid.innerHTML = fotos.map(f => `
-      <div class="foto-card">
-        <img src="/fotos/${f.foto_arquivo}?t=${TOKEN}" alt="Foto de ${f.funcNome}"/>
-        <div style="font-size:12px;font-weight:500;margin-bottom:3px;">${f.funcNome}</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">${fmtDT(f.dt)}</div>
-        <span class="badge ${BC[f.tipo]}">${L[f.tipo]}</span>
-      </div>`).join('')
-  } catch (_) {}
-}
-
-async function limparFotosAntigas() {
-  if (!confirm(`Descartar fotos com mais de ${CONFIG.dias_fotos} dias?`)) return
-  try {
-    const r = await api('DELETE', '/fotos/antigas')
-    alert(r.removidas > 0 ? `${r.removidas} foto(s) removida(s).` : 'Nenhuma foto para remover.')
-    renderFotos()
-  } catch (e) { alert('Erro: ' + e.message) }
-}
-
-// --- Relatório ---
+/* ============================================================
+   TAB: RELATÓRIOS
+============================================================ */
 async function renderRel() {
-  const rm = el('rel-metrics'), rb = el('rel-body'); if (!rm || !rb) return
-  try {
-    const { funcionarios: funcs, config: cfg } = await api('GET', '/relatorio')
-    const totalE = funcs.reduce((s, f) => s + f.entradas, 0)
-    const totalExtra = funcs.reduce((s, f) => s + (f.saldo > 0 ? f.saldo : 0), 0)
-    const totalDeve = funcs.reduce((s, f) => s + (f.saldo < 0 ? Math.abs(f.saldo) : 0), 0)
-    const totalF = funcs.reduce((s, f) => s + f.fotos, 0)
-    rm.innerHTML = `
-      <div class="metric"><div class="ml">Funcionários</div><div class="mv">${funcs.length}</div></div>
-      <div class="metric"><div class="ml">Total entradas</div><div class="mv">${totalE}</div></div>
-      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtra > 0 ? 'var(--red)' : 'var(--green)'}">${totalExtra > 0 ? '+' : ''}${fmtH(totalExtra)}</div></div>
-      <div class="metric"><div class="ml">A compensar</div><div class="mv" style="color:${totalDeve > 0 ? 'var(--warn)' : 'var(--green)'}">${totalDeve > 0 ? '-' : ''}${fmtH(totalDeve)}</div></div>
-      <div class="metric"><div class="ml">Fotos salvas</div><div class="mv">${totalF}</div></div>`
-    const statusBadge = (f) => {
-      if (!f.saldo && f.saldo !== 0) return f.entradas > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem ponto</span>'
-      if (f.saldo > cfg.tolerancia_min) return `<span class="badge bd">+${fmtH(f.saldo)} extra</span>`
-      if (f.saldo < -cfg.tolerancia_min) return `<span class="badge bw">${fmtH(f.saldo)} a compensar</span>`
-      if (f.entradas > 0) return '<span class="badge bk">Regular</span>'
-      return '<span class="badge bg">Sem ponto</span>'
+  const funcs = await getFuncs(State.loja.id);
+  document.getElementById('page').innerHTML = `
+    <div class="ph"><div><h2>Relatórios</h2><p>Previsto x realizado, faltas e ocorrências.</p></div>
+      <div class="row noprint">
+        <div class="seg"><button class="${State.repMode !== 'loja' ? 'on' : ''}" onclick="State.repMode='func';renderRel()">Por funcionário</button>
+        <button class="${State.repMode === 'loja' ? 'on' : ''}" onclick="State.repMode='loja';renderRel()">Por loja</button></div>
+        <button class="btn sm" onclick="shiftRep(-1)"><i class="ti ti-chevron-left"></i></button>
+        <div style="font-weight:700;min-width:130px;text-align:center">${capWord(State.repMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</div>
+        <button class="btn sm" onclick="shiftRep(1)"><i class="ti ti-chevron-right"></i></button>
+        <button class="btn sm" onclick="window.print()"><i class="ti ti-printer"></i> Imprimir</button>
+      </div></div>
+    <div id="rel-body"><div class="card"><div class="empty"><i class="ti ti-loader"></i>Carregando…</div></div></div>`;
+  if (State.repMode === 'loja') await relLoja(funcs); else await relFunc(funcs);
+}
+function shiftRep(n) { State.repMonth = new Date(State.repMonth.getFullYear(), State.repMonth.getMonth() + n, 1); renderRel(); }
+function realDoDia(rday) {
+  const ent = rday.find(r => r.tipo === 'entrada'), sai = rday.find(r => r.tipo === 'saida');
+  if (!ent || !sai) return 0;
+  const pa = rday.find(r => r.tipo === 'pausa'), vo = rday.find(r => r.tipo === 'volta');
+  let real = (sai.ts - ent.ts) / 60000; if (pa && vo) real -= (vo.ts - pa.ts) / 60000;
+  return Math.max(0, Math.round(real));
+}
+async function relFunc(funcs) {
+  if (!funcs.length) { document.getElementById('rel-body').innerHTML = emptyCard('Sem funcionários.'); return; }
+  if (!State.repFunc || !funcs.find(f => f.id === State.repFunc)) State.repFunc = funcs[0].id;
+  const func = funcs.find(f => f.id === State.repFunc);
+  const mk = monthKey(State.repMonth);
+  const escMes = await getEsc(State.loja.id, mk);
+  const regs = await getRegs(State.loja.id, mk);
+  const y = State.repMonth.getFullYear(), m = State.repMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
+  let prevTot = 0, realTot = 0, faltas = 0, rows = '';
+  for (let d = 1; d <= days; d++) {
+    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const p = planoDia(func, escMes, dateStr);
+    const rday = regs.filter(r => r.funcId === func.id && r.data === dateStr).sort((a, b) => a.ts - b.ts);
+    const ent = rday.find(r => r.tipo === 'entrada'), sai = rday.find(r => r.tipo === 'saida');
+    const prev = dur(p); prevTot += prev;
+    const real = realDoDia(rday); realTot += real;
+    let st;
+    if (!p.on) st = '<span class="badge bd-gy">Folga</span>';
+    else if (!ent) { st = '<span class="badge bd-rd">Falta</span>'; faltas++; }
+    else if (!sai) st = '<span class="badge bd-am">Sem saída</span>';
+    else st = '<span class="badge bd-gr">OK</span>';
+    if (!p.on && !ent) continue;
+    rows += `<tr><td class="mono">${String(d).padStart(2, '0')}/${String(m + 1).padStart(2, '0')} ${DOW[parseYmd(dateStr).getDay()]}</td>
+      <td class="mono">${p.on ? p.ini + '–' + p.fim : '—'}</td>
+      <td class="mono">${ent ? ent.hora : '—'}</td><td class="mono">${sai ? sai.hora : '—'}</td>
+      <td class="mono">${prev ? fmtMin(prev) : '—'}</td><td class="mono">${real ? fmtMin(real) : '—'}</td><td>${st}</td></tr>`;
+  }
+  const meta = State.cfg.metaHoras * 60;
+  document.getElementById('rel-body').innerHTML = `
+    <div class="row noprint" style="margin-bottom:14px">
+      <select class="inp" style="width:auto" onchange="State.repFunc=this.value;renderRel()">
+        ${funcs.map(f => `<option value="${f.id}" ${f.id === State.repFunc ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}</select>
+    </div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
+      ${kpi('Previsto', fmtH(prevTot), prevTot >= meta ? 'gr' : 'am')}
+      ${kpi('Realizado', fmtH(realTot), 'bl')}
+      ${kpi('Faltas', faltas, faltas ? 'rd' : 'gr')}
+      ${kpi('Meta', State.cfg.metaHoras + 'h', prevTot >= meta ? 'gr' : 'am')}
+    </div>
+    <div class="card"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(func.nome)}</b> <span class="mut">· ${esc(func.cargo || '')}</span></div>
+    <table class="tbl"><thead><tr><th>Dia</th><th>Previsto</th><th>Entrada</th><th>Saída</th><th>H. prev.</th><th>H. real</th><th>Status</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="7" class="empty">Sem registros neste mês.</td></tr>`}</tbody></table></div>`;
+}
+async function relLoja(funcs) {
+  const mk = monthKey(State.repMonth);
+  const escMes = await getEsc(State.loja.id, mk);
+  const regs = await getRegs(State.loja.id, mk);
+  const ocs = await getOcor(State.loja.id);
+  const y = State.repMonth.getFullYear(), m = State.repMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
+  const meta = State.cfg.metaHoras * 60;
+  let rows = '', totPrev = 0, totReal = 0, totFalt = 0;
+  for (const func of funcs) {
+    let prev = 0, real = 0, falt = 0;
+    for (let d = 1; d <= days; d++) {
+      const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const p = planoDia(func, escMes, dateStr); prev += dur(p);
+      const rday = regs.filter(r => r.funcId === func.id && r.data === dateStr).sort((a, b) => a.ts - b.ts);
+      const ent = rday.find(r => r.tipo === 'entrada');
+      if (p.on && !ent) falt++;
+      real += realDoDia(rday);
     }
-    rb.innerHTML = funcs.map(f => {
-      const pct = Math.min(100, f.jornadaEsperada > 0 ? Math.round((f.minTrab / f.jornadaEsperada) * 100) : 0)
-      const corBarra = f.saldo > cfg.tolerancia_min ? '#E24B4A' : f.saldo < -cfg.tolerancia_min ? '#BA7517' : '#185FA5'
-      const saldoTexto = f.saldo > 0 ? `+${fmtH(f.saldo)}` : f.saldo < 0 ? `-${fmtH(Math.abs(f.saldo))}` : '0h'
-      const corSaldo = f.saldo > cfg.tolerancia_min ? 'var(--red)' : f.saldo < -cfg.tolerancia_min ? 'var(--warn)' : 'var(--green)'
-      return `<tr>
-        <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
-        <td>${f.entradas}</td>
-        <td>${fmtH(f.minTrab)}</td>
-        <td><div style="display:flex;align-items:center;gap:6px;"><div class="pb" style="width:80px;"><div class="pf" style="width:${pct}%;background:${corBarra};"></div></div>${pct}%</div></td>
-        <td style="color:${corSaldo};font-weight:500;">${saldoTexto}</td>
-        <td>${f.fotos > 0 ? `<span class="badge bk"><i class="ti ti-camera"></i> ${f.fotos}</span>` : '<span class="badge bg">0</span>'}</td>
-        <td>${statusBadge(f)}</td>
-      </tr>`
-    }).join('')
-  } catch (_) {}
-}
-
-async function exportCSV() {
-  try {
-    const { funcionarios: funcs, config: cfg } = await api('GET', '/relatorio')
-    const regs = await api('GET', '/registros?limite=2000')
-    let csv = 'Funcionário,Cargo,Entradas,Horas Trab.,Horas Extras,Fotos,Status\n'
-    funcs.forEach(f => { csv += `"${f.nome}","${f.cargo}",${f.entradas},"${fmtH(f.minTrab)}","${fmtH(f.extra)}",${f.fotos},"${f.status}"\n` })
-    csv += '\nHistórico\nData/Hora,Funcionário,Evento,Com foto\n'
-    const L = { entrada: 'Entrada', saida: 'Saída', pausa: 'Pausa', volta: 'Volta da pausa' }
-    regs.forEach(r => { csv += `"${fmtDT(r.dt)}","${r.funcNome}","${L[r.tipo]}","${r.foto_arquivo ? 'sim' : 'não'}"\n` })
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url
-    a.download = `ponto_${SESSION.lojaNome.replace(/ /g, '_')}_${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`
-    a.click(); URL.revokeObjectURL(url)
-  } catch (e) { alert('Erro ao exportar: ' + e.message) }
-}
-
-// --- Config ---
-async function salvarCfg() {
-  try {
-    await api('PUT', '/config', { horas_diarias: parseInt(el('cfg-h').value) || 8, tolerancia_min: parseInt(el('cfg-t').value) || 10, dias_fotos: parseInt(el('cfg-dias').value) || 30 })
-    await loadConfig()
-    el('cfg-ok').textContent = 'Configurações salvas!'; el('cfg-ok').style.display = 'block'
-    setTimeout(() => el('cfg-ok').style.display = 'none', 2500)
-  } catch (e) { alert('Erro: ' + e.message) }
-}
-
-async function cadastrarFunc() {
-  const nome = el('novo-nome').value.trim(), cargo = el('novo-cargo').value.trim()
-  const hora_inicio = el('novo-inicio').value.trim(), hora_fim = el('novo-fim').value.trim()
-  if (!nome) { alert('Informe o nome.'); return }
-  if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
-    alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
+    const noc = ocs.filter(o => o.funcId === func.id && o.data.startsWith(mk)).length;
+    totPrev += prev; totReal += real; totFalt += falt;
+    rows += `<tr><td><div class="row" style="gap:8px"><div class="ava" style="background:${avColor(func.nome)};width:30px;height:30px;border-radius:8px;font-size:11px">${initials(func.nome)}</div><b>${esc(func.nome)}</b></div></td>
+      <td class="mono">${fmtH(prev)}</td><td class="mono">${fmtH(real)}</td>
+      <td>${falt ? `<span class="badge bd-rd">${falt}</span>` : '<span class="mut">0</span>'}</td>
+      <td>${noc ? `<span class="badge bd-gy">${noc}</span>` : '<span class="mut">0</span>'}</td>
+      <td>${prev >= meta ? '<span class="badge bd-gr">OK</span>' : '<span class="badge bd-am">Abaixo</span>'}</td></tr>`;
   }
+  document.getElementById('rel-body').innerHTML = `
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
+      ${kpi('Funcionários', funcs.length, 'bl')}
+      ${kpi('Total previsto', fmtH(totPrev), 'gr')}
+      ${kpi('Total realizado', fmtH(totReal), 'bl')}
+      ${kpi('Faltas', totFalt, totFalt ? 'rd' : 'gr')}
+    </div>
+    <div class="card"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(State.loja.nome)}</b> <span class="mut">· ${capWord(State.repMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</span></div>
+    <table class="tbl"><thead><tr><th>Funcionário</th><th>Previsto</th><th>Realizado</th><th>Faltas</th><th>Ocorr.</th><th>Meta</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6" class="empty">Sem funcionários.</td></tr>`}</tbody></table></div>`;
+}
+function kpi(lbl, val, c) { return `<div class="card cpad"><div class="lbl mut" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">${lbl}</div><div class="mono" style="font-size:24px;font-weight:700;color:var(--${c})">${val}</div></div>`; }
+function emptyCard(t) { return `<div class="card"><div class="empty"><i class="ti ti-mood-empty"></i>${t}</div></div>`; }
+
+/* ============================================================
+   TAB: CONFIG
+============================================================ */
+function renderCfg() {
+  const c = State.cfg;
+  document.getElementById('page').innerHTML = `
+    <div class="ph"><div><h2>Configurações</h2><p>Ajustes gerais do sistema.</p></div></div>
+    <div class="card cpad grid" style="max-width:520px;gap:16px">
+      <div class="row" style="gap:12px">
+        <div style="flex:1"><label class="fl">Meta de horas / mês</label><input id="c-meta" class="inp" type="number" value="${c.metaHoras}"></div>
+        <div style="flex:1"><label class="fl">Tolerância (min)</label><input id="c-tol" class="inp" type="number" value="${c.tolerancia}"></div>
+        <div style="flex:1"><label class="fl">Intervalo padrão</label><input id="c-int" class="inp" type="number" value="${c.intervaloPadrao}"></div>
+      </div>
+      <div><label class="fl">Nova senha desta loja (deixe vazio para manter)</label><input id="c-senha" class="inp" type="text" placeholder="••••"></div>
+      <div><button class="btn p" onclick="saveCfg()"><i class="ti ti-device-floppy"></i> Salvar configurações</button></div>
+    </div>
+    <p class="mut" style="font-size:12px;margin-top:16px;max-width:520px">Os dados ficam salvos no servidor (disco persistente do Render). Abaixo de ${c.metaHoras}h previstas, a aba Escala mostra o alerta automaticamente.</p>`;
+}
+async function saveCfg() {
+  const meta = +document.getElementById('c-meta').value || 180;
+  const tol = +document.getElementById('c-tol').value || 0;
+  const intv = +document.getElementById('c-int').value || 0;
+  const novaSenha = document.getElementById('c-senha').value;
   try {
-    await api('POST', '/funcionarios', { nome, cargo, hora_inicio, hora_fim })
-    el('novo-nome').value = ''; el('novo-cargo').value = ''
-    el('novo-inicio').value = ''; el('novo-fim').value = ''
-    await loadFuncs()
-  } catch (e) { alert('Erro: ' + e.message) }
+    await api('PUT', '/api/config', { metaHoras: meta, tolerancia: tol, intervaloPadrao: intv });
+    if (novaSenha) await api('PUT', '/api/loja/senha', { senha: novaSenha });
+    State.cfg.metaHoras = meta; State.cfg.tolerancia = tol; State.cfg.intervaloPadrao = intv;
+    SESS.config = State.cfg; saveSess();
+    toast('Configurações salvas', 'ok');
+  } catch (e) { toast('Erro ao salvar', 'err'); }
 }
 
-async function alterarSenha() {
-  const s = el('nova-senha').value
-  if (s.length < 4) { alert('Mínimo 4 caracteres.'); return }
-  try {
-    await api('PUT', '/senha', { senha: s })
-    el('nova-senha').value = ''
-    el('senha-ok').textContent = 'Senha alterada!'; el('senha-ok').style.display = 'block'
-    setTimeout(() => el('senha-ok').style.display = 'none', 2500)
-  } catch (e) { alert('Erro: ' + e.message) }
+/* ============================================================
+   MODAL
+============================================================ */
+function openModal(title, body, actions) {
+  document.getElementById('modal-root').innerHTML = `<div class="ovl" onclick="if(event.target===this)closeModal()">
+    <div class="modal"><div class="m-head"><h3>${title}</h3><button class="iconbtn" onclick="closeModal()"><i class="ti ti-x"></i></button></div>
+    <div class="m-body">${body}</div>
+    <div class="m-foot">${actions.map(a => `<button class="btn ${a.cls}" onclick="${a.fn}">${a.lbl}</button>`).join('')}</div></div></div>`;
+}
+function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+function noFuncs(msg) {
+  document.getElementById('page').innerHTML = `<div class="ph"><div><h2>${TABS.find(t => t.k === State.tab).lbl}</h2></div></div><div class="card"><div class="empty"><i class="ti ti-users"></i>${msg}</div></div>`;
 }
 
-function renderFuncBody() {
-  const fb = el('func-body'); if (!fb) return
-  fb.innerHTML = FUNCS.map(f => `<tr>
-    <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(f.nome)}</div>${f.nome}</div></td>
-    <td>${f.cargo || '—'}</td>
-    <td>${f.hora_inicio && f.hora_fim
-      ? `<span class="badge bi"><i class="ti ti-clock"></i> ${f.hora_inicio} — ${f.hora_fim}</span>`
-      : '<span class="badge bg">Sem jornada</span>'}</td>
-    <td><span class="badge bk">Ativo</span></td>
-    <td><button class="btn btn-sm btn-i" onclick='abrirModal(${JSON.stringify(f).replace(/'/g,"&#39;")})'>
-      <i class="ti ti-pencil"></i> Editar
-    </button></td>
-  </tr>`).join('')
-}
-
-function validarHora(h) {
-  return /^([01]?\d|2[0-3]):([0-5]\d)$/.test(h)
-}
-
-function abrirModal(func) {
-  el('edit-func-id').value = func.id
-  el('edit-nome').value = func.nome
-  el('edit-cargo').value = func.cargo || ''
-  el('edit-inicio').value = func.hora_inicio || ''
-  el('edit-fim').value = func.hora_fim || ''
-  el('edit-ok').style.display = 'none'
-  const modal = el('modal-jornada')
-  modal.style.display = 'flex'
-}
-
-function fecharModal() {
-  el('modal-jornada').style.display = 'none'
-}
-
-async function salvarJornada() {
-  const id = el('edit-func-id').value
-  const nome = el('edit-nome').value.trim()
-  const cargo = el('edit-cargo').value.trim()
-  const hora_inicio = el('edit-inicio').value.trim()
-  const hora_fim = el('edit-fim').value.trim()
-  if (!nome) { alert('Informe o nome.'); return }
-  if ((hora_inicio && !validarHora(hora_inicio)) || (hora_fim && !validarHora(hora_fim))) {
-    alert('Horário inválido. Use o formato HH:MM, ex: 14:00'); return
-  }
-  try {
-    await api('PUT', `/funcionarios/${id}`, { nome, cargo, hora_inicio, hora_fim })
-    el('edit-ok').style.display = 'flex'
-    setTimeout(() => fecharModal(), 1200)
-    await loadFuncs()
-  } catch (e) { alert('Erro: ' + e.message) }
-}
-
-function switchTab(name, btn) {
-  document.querySelectorAll('.pg').forEach(p => p.classList.remove('on'))
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'))
-  el('pg-' + name).classList.add('on'); btn.classList.add('on')
-  stopCam()
-  if (name === 'hist') renderHist()
-  if (name === 'rel') renderRel()
-  if (name === 'fotos') renderFotos()
-  if (name === 'cfg') { renderFuncBody(); if (SESSION.role === 'master') renderTodasLojas() }
-  if (name === 'apuracao') initApuracao()
-}
-
-function setStepDots(active) {
-  document.querySelectorAll('.step-dot').forEach((d, i) => { d.className = 'step-dot' + (i < active ? ' done' : i === active ? ' on' : '') })
-}
-
-function showErr(id, msg) {
-  const e = el(id); e.textContent = msg; e.style.display = 'block'
-}
-
-// --- Apuração mensal ---
-function initApuracao() {
-  // Popular anos (últimos 3 anos)
-  const anoSel = el('apur-ano')
-  const anoAtual = new Date().getFullYear()
-  anoSel.innerHTML = ''
-  for (let a = anoAtual; a >= anoAtual - 2; a--) {
-    const o = document.createElement('option'); o.value = a; o.textContent = a; anoSel.appendChild(o)
-  }
-  // Mês atual
-  el('apur-mes').value = new Date().getMonth() + 1
-
-  // Popular funcionários
-  const af = el('apur-func')
-  af.innerHTML = '<option value="">Todos</option>'
-  FUNCS.forEach(f => { const o = document.createElement('option'); o.value = f.id; o.textContent = f.nome; af.appendChild(o) })
-
-  renderApuracao()
-}
-
-async function renderApuracao() {
-  const mes = parseInt(el('apur-mes').value)
-  const ano = parseInt(el('apur-ano').value)
-  const funcFiltro = el('apur-func').value
-  if (!mes || !ano) return
-
-  // Datas do mês
-  const dtInicio = new Date(ano, mes - 1, 1).toISOString()
-  const dtFim = new Date(ano, mes, 0, 23, 59, 59).toISOString()
-  const diasNoMes = new Date(ano, mes, 0).getDate()
-
-  // Dias úteis no mês (seg-sex)
-  let diasUteis = 0
-  for (let d = 1; d <= diasNoMes; d++) {
-    const dia = new Date(ano, mes - 1, d).getDay()
-    if (dia !== 0 && dia !== 6) diasUteis++
-  }
-
-  try {
-    const funcsApurar = funcFiltro ? FUNCS.filter(f => f.id == funcFiltro) : FUNCS
-    const regs = await api('GET', `/registros?limite=5000`)
-    const regsDoMes = regs.filter(r => r.dt >= dtInicio && r.dt <= dtFim)
-
-    const rows = funcsApurar.map(func => {
-      const regsFunc = regsDoMes.filter(r => r.funcionario_id == func.id || r.funcNome === func.nome)
-
-      // Agrupar por dia
-      const porDia = {}
-      regsFunc.forEach(r => {
-        const dia = new Date(r.dt).toLocaleDateString('pt-BR')
-        if (!porDia[dia]) porDia[dia] = {}
-        porDia[dia][r.tipo] = r.dt
-      })
-
-      // Calcular dias trabalhados e horas reais (só conta dias com entrada E saída)
-      const diasTrabalhados = Object.keys(porDia).filter(d => porDia[d].entrada).length
-      const diasCompletos = Object.keys(porDia).filter(d => porDia[d].entrada && porDia[d].saida).length
-      let minsTrabalhados = 0
-      Object.values(porDia).forEach(d => {
-        minsTrabalhados += calcMins(d)
-      })
-      minsTrabalhados = Math.round(minsTrabalhados)
-      const minsEsperados = diasUteis * CONFIG.horas_diarias * 60
-      const minsExtras = Math.max(0, minsTrabalhados - minsEsperados)
-      const faltas = Math.max(0, diasUteis - diasTrabalhados)
-
-      return { func, diasTrabalhados, diasCompletos, diasUteis, minsTrabalhados, minsEsperados, minsExtras, faltas, porDia }
-    })
-
-    // Métricas totais
-    const totalDias = rows.reduce((s, r) => s + r.diasTrabalhados, 0)
-    const totalMins = rows.reduce((s, r) => s + r.minsTrabalhados, 0)
-    const totalExtras = rows.reduce((s, r) => s + r.minsExtras, 0)
-    const totalFaltas = rows.reduce((s, r) => s + r.faltas, 0)
-    const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
-
-    apuracaoAtual = { rows, nomeMes, ano, diasUteis, lojaNome: SESSION.lojaNome }
-
-    el('apur-metrics').innerHTML = `
-      <div class="metric"><div class="ml">Mês</div><div class="mv" style="font-size:16px;">${nomeMes} ${ano}</div></div>
-      <div class="metric"><div class="ml">Dias úteis</div><div class="mv">${diasUteis}</div></div>
-      <div class="metric"><div class="ml">Total horas trab.</div><div class="mv">${fmtH(totalMins)}</div></div>
-      <div class="metric"><div class="ml">Horas extras</div><div class="mv" style="color:${totalExtras>0?'var(--red)':'var(--green)'}">${fmtH(totalExtras)}</div></div>
-      <div class="metric"><div class="ml">Faltas</div><div class="mv" style="color:${totalFaltas>0?'var(--red)':'var(--green)'}">${totalFaltas}</div></div>`
-
-    const ab = el('apur-body')
-    ab.innerHTML = rows.map(r => {
-      const pct = Math.min(100, r.minsEsperados > 0 ? Math.round((r.minsTrabalhados / r.minsEsperados) * 100) : 0)
-      const badge = r.faltas > 3 ? `<span class="badge bd">${r.faltas} faltas</span>` :
-                    r.minsExtras > 0 ? `<span class="badge bw">+${fmtH(r.minsExtras)} extra</span>` :
-                    r.diasTrabalhados > 0 ? '<span class="badge bk">Regular</span>' : '<span class="badge bg">Sem registros</span>'
-      return `<tr style="cursor:pointer;" onclick="verDetalhe(${JSON.stringify(r.func).replace(/"/g,'&quot;')}, ${JSON.stringify(r.porDia).replace(/"/g,'&quot;')}, '${nomeMes} ${ano}')">
-        <td><div style="display:flex;align-items:center;gap:8px;"><div class="av">${ini(r.func.nome)}</div>${r.func.nome}</div></td>
-        <td>${r.diasTrabalhados} / ${r.diasUteis}</td>
-        <td>${fmtH(r.minsTrabalhados)}</td>
-        <td>${fmtH(r.minsEsperados)}</td>
-        <td style="color:${r.minsExtras>0?'var(--red)':'var(--muted)'}">${r.minsExtras > 0 ? '+'+fmtH(r.minsExtras) : '—'}</td>
-        <td style="color:${r.faltas>0?'var(--red)':'var(--muted)'}">${r.faltas > 0 ? r.faltas : '—'}</td>
-        <td>${badge}</td>
-      </tr>`
-    }).join('')
-
-    // Esconder detalhe ao recarregar
-    el('apur-detalhe-card').style.display = 'none'
-
-  } catch(e) { console.error(e) }
-}
-
-function verDetalhe(func, porDia, periodo) {
-  el('apur-detalhe-titulo').textContent = `Detalhe — ${func.nome} — ${periodo}`
-  el('apur-detalhe-card').style.display = 'block'
-  el('apur-detalhe-card').scrollIntoView({ behavior: 'smooth' })
-
-  const dias = Object.keys(porDia).sort((a, b) => {
-    const [da, ma, aa] = a.split('/'); const [db, mb, ab] = b.split('/')
-    return new Date(aa, ma-1, da) - new Date(ab, mb-1, db)
-  })
-
-  detalheAtual = { func, dias, porDia, periodo, lojaNome: SESSION.lojaNome }
-
-  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
-  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
-
-  el('apur-detalhe-body').innerHTML = dias.map(dia => {
-    const d = porDia[dia]
-    const [dd, mm, aa] = dia.split('/')
-    const diaSemana = DIAS_SEMANA[new Date(aa, mm - 1, dd).getDay()]
-    const temEntrada = !!d.entrada
-    const temSaida = !!d.saida
-    const mins = calcMins(d)
-    const status = !temEntrada ? '<span class="badge bd">Falta</span>' :
-                   !temSaida ? '<span class="badge bw">Sem saída</span>' :
-                   '<span class="badge bk">Ok</span>'
-    return `<tr>
-      <td>${dia}</td>
-      <td style="color:var(--muted)">${diaSemana}</td>
-      <td>${fmtHora(d.entrada)}</td>
-      <td>${fmtHora(d.pausa)}</td>
-      <td>${fmtHora(d.volta)}</td>
-      <td>${fmtHora(d.saida)}</td>
-      <td>${temEntrada && temSaida ? fmtH(Math.round(mins)) : '—'}</td>
-      <td>${status}</td>
-    </tr>`
-  }).join('') || '<tr><td colspan="8" style="text-align:center;padding:16px;color:var(--muted);">Nenhum registro neste período</td></tr>'
-}
-
-async function exportApuracaoCSV() {
-  const mes = parseInt(el('apur-mes').value)
-  const ano = parseInt(el('apur-ano').value)
-  const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][mes-1]
-  const dtInicio = new Date(ano, mes - 1, 1).toISOString()
-  const dtFim = new Date(ano, mes, 0, 23, 59, 59).toISOString()
-  const diasNoMes = new Date(ano, mes, 0).getDate()
-  let diasUteis = 0
-  for (let d = 1; d <= diasNoMes; d++) {
-    const dia = new Date(ano, mes - 1, d).getDay()
-    if (dia !== 0 && dia !== 6) diasUteis++
-  }
-
-  const regs = await api('GET', `/registros?limite=5000`)
-  const regsDoMes = regs.filter(r => r.dt >= dtInicio && r.dt <= dtFim)
-
-  let csv = `Apuração de Horas — ${nomeMes} ${ano} — ${SESSION.lojaNome}\n`
-  csv += `Dias úteis no mês: ${diasUteis}\n\n`
-  csv += `Funcionário,Cargo,Dias Trabalhados,Dias Úteis,Horas Trabalhadas,Horas Esperadas,Horas Extras,Faltas,Status\n`
-
-  for (const func of FUNCS) {
-    const regsFunc = regsDoMes.filter(r => r.funcNome === func.nome)
-    const porDia = {}
-    regsFunc.forEach(r => {
-      const dia = new Date(r.dt).toLocaleDateString('pt-BR')
-      if (!porDia[dia]) porDia[dia] = {}
-      porDia[dia][r.tipo] = r.dt
-    })
-    const diasTrab = Object.keys(porDia).filter(d => porDia[d].entrada).length
-    let minsTrab = 0
-    Object.values(porDia).forEach(d => { minsTrab += calcMins(d) })
-    minsTrab = Math.round(minsTrab)
-    const minsEsp = diasUteis * CONFIG.horas_diarias * 60
-    const extras = Math.max(0, minsTrab - minsEsp)
-    const faltas = Math.max(0, diasUteis - diasTrab)
-    const status = faltas > 3 ? 'Muitas faltas' : extras > 0 ? 'Hora extra' : diasTrab > 0 ? 'Regular' : 'Sem registros'
-    csv += `"${func.nome}","${func.cargo}",${diasTrab},${diasUteis},"${fmtH(minsTrab)}","${fmtH(minsEsp)}","${fmtH(extras)}",${faltas},"${status}"\n`
-  }
-
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url
-  a.download = `apuracao_${nomeMes}_${ano}_${SESSION.lojaNome.replace(/ /g,'_')}.csv`
-  a.click(); URL.revokeObjectURL(url)
-}
-
-// Calcula minutos reais trabalhados num dia a partir do objeto porDia
-function calcMins(d) {
-  if (!d || !d.entrada || !d.saida) return 0
-  let pausaMins = 0
-  if (d.pausa && d.volta) pausaMins = (new Date(d.volta) - new Date(d.pausa)) / 60000
-  return Math.max(0, (new Date(d.saida) - new Date(d.entrada)) / 60000 - pausaMins)
-}
-
-async function renomearLoja() {
-  const nome = el('novo-nome-loja').value.trim()
-  if (!nome) { alert('Informe o novo nome.'); return }
-  try {
-    const r = await api('PUT', '/loja/renomear', { nome })
-    SESSION.lojaNome = r.nome
-    el('hdr-loja').textContent = r.nome
-    el('novo-nome-loja').value = ''
-    el('loja-ok').style.display = 'flex'
-    setTimeout(() => el('loja-ok').style.display = 'none', 2500)
-    // Recarregar lista de lojas no login e na tabela
-    const lojas = await api('GET', '/lojas')
-    const ll = el('ll'); if(ll){ ll.innerHTML='<option value="">— Selecione a loja —</option>'; lojas.forEach(l=>{const o=document.createElement('option');o.value=l;o.textContent=l;ll.appendChild(o)}) }
-    if (SESSION.role === 'master') renderTodasLojas()
-  } catch (e) { alert('Erro: ' + e.message) }
-}
-
-async function renderTodasLojas() {
-  if (SESSION.role !== 'master') return
-  try {
-    const lojas = await api('GET', '/lojas/todas')
-    const tb = el('todas-lojas-body'); if (!tb) return
-    tb.innerHTML = lojas.map(l => `<tr>
-      <td><strong>${l.nome}</strong></td>
-      <td><span class="badge bg">${l.senha}</span></td>
-      <td><input type="password" id="senha-loja-${l.id}" placeholder="Nova senha" style="width:140px;margin-bottom:0;padding:7px 10px;font-size:12px;"/></td>
-      <td><button class="btn btn-sm btn-i" onclick="alterarSenhaLoja(${l.id})"><i class="ti ti-lock"></i> Salvar</button></td>
-    </tr>`).join('')
-    el('card-todas-lojas').style.display = 'block'
-  } catch(_) {}
-}
-
-async function alterarSenhaLoja(id) {
-  const s = el(`senha-loja-${id}`).value
-  if (!s || s.length < 4) { alert('Mínimo 4 caracteres.'); return }
-  try {
-    await api('PUT', `/lojas/${id}/senha`, { senha: s })
-    el(`senha-loja-${id}`).value = ''
-    alert('Senha alterada!')
-    renderTodasLojas()
-  } catch (e) { alert('Erro: ' + e.message) }
-}
-
-// Iniciar
-initLogin()
-
-// --- Geração de PDF ---
-let apuracaoAtual = null
-let detalheAtual = null
-
-function gerarPDF() {
-  if (!apuracaoAtual) { alert('Carregue a apuração primeiro.'); return }
-  const { rows, nomeMes, ano, diasUteis, lojaNome } = apuracaoAtual
-  const { jsPDF } = window.jspdf
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-
-  const W = 210, margem = 14
-  let y = 14
-
-  // Cabeçalho
-  doc.setFillColor(24, 95, 165)
-  doc.rect(0, 0, W, 28, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFontSize(16); doc.setFont(undefined, 'bold')
-  doc.text('Grupo Shalom', margem, 11)
-  doc.setFontSize(10); doc.setFont(undefined, 'normal')
-  doc.text('Folha de Ponto — ' + nomeMes + ' ' + ano, margem, 18)
-  doc.text(lojaNome, margem, 24)
-  doc.setTextColor(180, 210, 255)
-  doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), W - margem, 18, { align: 'right' })
-  y = 36
-
-  // Info do mês
-  doc.setTextColor(100, 100, 100)
-  doc.setFontSize(9)
-  doc.text(`Dias úteis no mês: ${diasUteis}   |   Jornada diária: ${CONFIG.horas_diarias}h   |   Tolerância: ${CONFIG.tolerancia_min} min`, margem, y)
-  y += 8
-
-  // Tabela resumo
-  const tableData = rows.map(r => [
-    r.func.nome,
-    r.func.cargo || '—',
-    `${r.diasTrabalhados} / ${r.diasUteis}`,
-    fmtH(r.minsTrabalhados),
-    fmtH(r.minsEsperados),
-    r.minsExtras > 0 ? '+' + fmtH(r.minsExtras) : '—',
-    r.faltas > 0 ? String(r.faltas) : '—',
-    r.faltas > 3 ? 'Muitas faltas' : r.minsExtras > 0 ? 'Hora extra' : r.diasTrabalhados > 0 ? 'Regular' : 'Sem reg.'
-  ])
-
-  doc.autoTable({
-    startY: y,
-    head: [['Funcionário', 'Cargo', 'Dias', 'Horas trab.', 'Esperado', 'Extras', 'Faltas', 'Status']],
-    body: tableData,
-    theme: 'grid',
-    headStyles: { fillColor: [24, 95, 165], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
-    alternateRowStyles: { fillColor: [245, 247, 250] },
-    columnStyles: {
-      0: { cellWidth: 42 }, 1: { cellWidth: 28 }, 2: { cellWidth: 18, halign: 'center' },
-      3: { cellWidth: 22, halign: 'center' }, 4: { cellWidth: 22, halign: 'center' },
-      5: { cellWidth: 18, halign: 'center', textColor: [163, 45, 45] },
-      6: { cellWidth: 14, halign: 'center', textColor: [163, 45, 45] },
-      7: { cellWidth: 22, halign: 'center' }
-    },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 7) {
-        const v = data.cell.raw
-        if (v === 'Regular') data.cell.styles.textColor = [59, 109, 17]
-        else if (v === 'Hora extra' || v === 'Muitas faltas') data.cell.styles.textColor = [163, 45, 45]
-      }
-    }
-  })
-
-  // Rodapé
-  const pageH = doc.internal.pageSize.height
-  doc.setDrawColor(200, 200, 200); doc.line(margem, pageH - 14, W - margem, pageH - 14)
-  doc.setFontSize(8); doc.setTextColor(150, 150, 150)
-  doc.text('Grupo Shalom — Sistema de Registro de Ponto', margem, pageH - 8)
-  doc.text('Página 1', W - margem, pageH - 8, { align: 'right' })
-
-  doc.save(`folha_ponto_${nomeMes}_${ano}_${lojaNome.replace(/ /g, '_')}.pdf`)
-}
-
-function gerarPDFDetalhe() {
-  if (!detalheAtual) { alert('Selecione um funcionário primeiro.'); return }
-  const { func, dias, porDia, periodo, lojaNome } = detalheAtual
-  const { jsPDF } = window.jspdf
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-  const W = 210, margem = 14
-
-  // Cabeçalho
-  doc.setFillColor(24, 95, 165)
-  doc.rect(0, 0, W, 30, 'F')
-  doc.setTextColor(255, 255, 255)
-  doc.setFontSize(16); doc.setFont(undefined, 'bold')
-  doc.text('Grupo Shalom', margem, 11)
-  doc.setFontSize(10); doc.setFont(undefined, 'normal')
-  doc.text('Folha de Ponto Individual — ' + periodo, margem, 18)
-  doc.text(lojaNome, margem, 24)
-  doc.setTextColor(180, 210, 255)
-  doc.text('Gerado em: ' + new Date().toLocaleString('pt-BR'), W - margem, 18, { align: 'right' })
-
-  // Info funcionário
-  let y = 38
-  doc.setFillColor(240, 245, 255)
-  doc.roundedRect(margem, y, W - margem * 2, 14, 3, 3, 'F')
-  doc.setTextColor(30, 30, 30); doc.setFontSize(11); doc.setFont(undefined, 'bold')
-  doc.text(func.nome, margem + 4, y + 6)
-  doc.setFont(undefined, 'normal'); doc.setFontSize(9); doc.setTextColor(100, 100, 100)
-  doc.text(func.cargo || '', margem + 4, y + 11)
-  y += 22
-
-  const fmtHora = dt => dt ? new Date(dt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
-  const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
-
-  const tableData = dias.map(dia => {
-    const d = porDia[dia] || {}
-    const [dd, mm, aa] = dia.split('/')
-    const diaSemana = DIAS_SEMANA[new Date(aa, mm - 1, dd).getDay()]
-    const temEntrada = !!d.entrada
-    const temSaida = !!d.saida
-    const mins = calcMins(d)
-    const status = !temEntrada ? 'Falta' : !temSaida ? 'Sem saída' : 'Ok'
-    return [dia, diaSemana, fmtHora(d.entrada), fmtHora(d.pausa), fmtHora(d.volta), fmtHora(d.saida), temEntrada && temSaida ? fmtH(mins) : '—', status]
-  })
-
-  doc.autoTable({
-    startY: y,
-    head: [['Data', 'Dia', 'Entrada', 'Pausa', 'Volta', 'Saída', 'Horas', 'Status']],
-    body: tableData,
-    theme: 'grid',
-    headStyles: { fillColor: [24, 95, 165], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
-    alternateRowStyles: { fillColor: [245, 247, 250] },
-    columnStyles: {
-      0: { cellWidth: 22, halign: 'center' }, 1: { cellWidth: 14, halign: 'center' },
-      2: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 22, halign: 'center' },
-      4: { cellWidth: 22, halign: 'center' }, 5: { cellWidth: 22, halign: 'center' },
-      6: { cellWidth: 20, halign: 'center' }, 7: { cellWidth: 24, halign: 'center' }
-    },
-    didParseCell: (data) => {
-      if (data.section === 'body' && data.column.index === 7) {
-        if (data.cell.raw === 'Ok') data.cell.styles.textColor = [59, 109, 17]
-        else if (data.cell.raw === 'Falta') data.cell.styles.textColor = [163, 45, 45]
-        else data.cell.styles.textColor = [133, 79, 11]
-      }
-    }
-  })
-
-  // Totais
-  const totalDias = dias.filter(d => porDia[d] && porDia[d].entrada && porDia[d].saida).length
-  const totalMins = dias.reduce((s, d) => s + calcMins(porDia[d] || {}), 0)
-  const fy = doc.lastAutoTable.finalY + 6
-  doc.setFontSize(9); doc.setTextColor(80, 80, 80)
-  doc.text(`Total de dias trabalhados: ${totalDias}   |   Total de horas: ${fmtH(Math.round(totalMins))}`, margem, fy)
-
-  // Assinaturas
-  const sigY = fy + 20
-  doc.setDrawColor(150, 150, 150)
-  doc.line(margem, sigY, margem + 70, sigY)
-  doc.line(W - margem - 70, sigY, W - margem, sigY)
-  doc.setFontSize(8); doc.setTextColor(120, 120, 120)
-  doc.text('Assinatura do Funcionário', margem + 35, sigY + 5, { align: 'center' })
-  doc.text('Assinatura do Gerente', W - margem - 35, sigY + 5, { align: 'center' })
-
-  // Rodapé
-  const pageH = doc.internal.pageSize.height
-  doc.setDrawColor(200, 200, 200); doc.line(margem, pageH - 14, W - margem, pageH - 14)
-  doc.setFontSize(8); doc.setTextColor(150, 150, 150)
-  doc.text('Grupo Shalom — Sistema de Registro de Ponto', margem, pageH - 8)
-  doc.text('Documento gerado automaticamente', W - margem, pageH - 8, { align: 'right' })
-
-  doc.save(`folha_${func.nome.replace(/ /g, '_')}_${periodo.replace(/ /g, '_')}.pdf`)
-}
-  
+/* ============================================================
+   BOOT
+============================================================ */
+bootLogin();
+tickClocks();
+if (SESS && SESS.token) enterApp();
