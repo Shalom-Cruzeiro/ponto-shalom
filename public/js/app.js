@@ -195,40 +195,35 @@ const STEP_SHORT = { entrada: 'Entrada', pausa: 'Pausa', volta: 'Retorno', saida
 function renderPunchGrid() {
   const ds = todayStr();
   const g = document.getElementById('pk-grid');
-  if (!PUNCH.funcs.length) { g.innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`; return; }
+  if (!PUNCH.funcs.length) { g.innerHTML = `<div class="empty" style="width:100%"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`; return; }
   g.innerHTML = PUNCH.funcs.map(f => {
-    const done = regsDoDia(f.id, ds).map(r => r.tipo);
+    const horaDe = {}; regsDoDia(f.id, ds).forEach(r => horaDe[r.tipo] = r.hora);
     const nx = proximoTipo(f.id, ds);
     const plano = planoDia(f, PUNCH.escMes, ds);
     const turno = plano.on ? `${plano.ini}–${plano.fim}` : 'Folga';
-    const steps = TIPOS.map(t => {
-      const cls = done.includes(t.k) ? 'done' : (t.k === nx ? 'next' : 'todo');
-      const ic = done.includes(t.k) ? 'ti-check' : t.ic;
-      return `<div class="step ${cls}"><i class="ti ${ic}"></i><span>${STEP_SHORT[t.k]}</span></div>`;
+    const tiles = TIPOS.map(t => {
+      if (horaDe[t.k]) return `<div class="ptile done"><i class="ti ti-check"></i><span>${STEP_SHORT[t.k]}</span><b>${horaDe[t.k]}</b></div>`;
+      return `<button class="ptile ${t.k === nx ? 'next' : ''}" onclick="startCapture('${f.id}','${t.k}')"><i class="ti ${t.ic}"></i><span>${STEP_SHORT[t.k]}</span><b>Registrar</b></button>`;
     }).join('');
-    const cta = nx
-      ? `<div class="emp-cta"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> Registrar ${STEP_SHORT[nx]}</div>`
-      : `<div class="emp-cta ok"><i class="ti ti-circle-check"></i> Dia concluído</div>`;
-    return `<button class="emp ${nx ? '' : 'concluido'}" ${nx ? '' : 'disabled'} onclick="startCapture('${f.id}')">
+    return `<div class="emp">
       <div class="emp-head">
         <div class="ava lg" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
         <div style="min-width:0"><div class="nm">${esc(f.nome)}</div><div class="turno mono">${turno}</div></div>
       </div>
-      <div class="steps">${steps}</div>
-      ${cta}
-    </button>`;
+      <div class="ptiles">${tiles}</div>
+    </div>`;
   }).join('');
 }
 
 /* ---------- captura ---------- */
 let CAM = { stream: null, funcId: null, tipo: null };
-async function startCapture(funcId) {
+async function startCapture(funcId, tipo) {
   let prep;
-  try { prep = await api('POST', '/api/punch/prepare', { funcId }); }
+  try { prep = await api('POST', '/api/punch/prepare', { funcId, tipo }); }
   catch (e) { toast('Não consegui registrar: ' + e.message, 'err'); return; }
   if (prep.erro) { toast('Erro: ' + prep.erro, 'err'); return; }
+  if (prep.jaRegistrado) { toast((STEP_SHORT[prep.tipo] || 'Ponto') + ' já foi registrado hoje', 'warn'); return; }
   if (prep.blocked) { openCapBlock(prep); return; }
-  if (prep.concluido || !prep.tipo) { toast('Dia já concluído para este funcionário', 'warn'); return; }
   CAM = { stream: null, funcId, tipo: prep.tipo };
   openCapUI(prep);
 }
@@ -302,17 +297,19 @@ function onFilePhoto(ev) {
 }
 async function confirmPunch(blob) {
   const btn = document.getElementById('cap-confirm'); if (btn) { btn.disabled = true; btn.innerHTML = 'Registrando...'; }
-  const fd = new FormData(); fd.append('funcId', CAM.funcId); if (blob) fd.append('foto', blob, 'p.jpg');
+  const fd = new FormData(); fd.append('funcId', CAM.funcId); fd.append('tipo', CAM.tipo); if (blob) fd.append('foto', blob, 'p.jpg');
   let r;
   try { r = await fetch('/api/punch', { method: 'POST', headers: { 'x-token': SESS.token }, body: fd }).then(x => x.json()); }
   catch (e) { toast('Falha ao registrar', 'err'); if (btn) btn.disabled = false; return; }
   if (r.blocked) { closeCapture(); openCapBlock(r); return; }
+  if (r.jaRegistrado) { toast((STEP_SHORT[r.tipo] || 'Ponto') + ' já registrado', 'warn'); closeCapture(); renderPunchGrid(); return; }
   if (r.ok) {
     PUNCH.regs.push(r.reg);
     const f = PUNCH.funcs.find(x => x.id === CAM.funcId);
     toast(`${TIPO_LBL[r.reg.tipo]} registrada · ${f.nome.split(' ')[0]} · ${r.reg.hora}`, 'ok');
+    if (r.ocorrencia) setTimeout(() => toast('Saída sem entrada — ocorrência gerada automaticamente', 'warn'), 1300);
     closeCapture(); renderPunchGrid();
-  } else { toast('Não foi possível registrar', 'err'); if (btn) btn.disabled = false; }
+  } else { toast(r.error ? ('Erro: ' + r.error) : 'Não foi possível registrar', 'err'); if (btn) btn.disabled = false; }
 }
 function closeCapture() {
   if (CAM.stream) { CAM.stream.getTracks().forEach(t => t.stop()); CAM.stream = null; }
@@ -646,20 +643,42 @@ function computeDia(func, escMes, regs, dateStr) {
   const ent = rday.find(r => r.tipo === 'entrada'), pausa = rday.find(r => r.tipo === 'pausa'),
         volta = rday.find(r => r.tipo === 'volta'), sai = rday.find(r => r.tipo === 'saida');
   const prev = dur(p), trab = realDoDia(rday);
-  let extra = 0, falta = false, status;
-  if (!p.on) { status = (ent && sai) ? 'extra' : 'folga'; if (ent && sai) extra = trab; }
-  else if (!ent) { status = 'falta'; falta = true; }
-  else if (!sai) { status = 'aberto'; }
-  else { status = 'ok'; extra = Math.max(0, trab - prev); }
-  return { p, ent, pausa, volta, sai, prev, trab, extra, falta, status };
+  const TOL = 5; // minutos de tolerância
+  const issues = []; let extra = 0, falta = false, status;
+  if (!p.on) {
+    status = (ent || sai) ? 'extra' : 'folga';
+    if (ent && sai) extra = trab;
+  } else if (!ent && !sai) {
+    status = 'falta'; falta = true; issues.push('Falta');
+  } else {
+    if (!ent) issues.push('Sem entrada');
+    if (!sai) issues.push('Sem saída');
+    // horas a menos (só dá pra medir com entrada e saída)
+    if (ent && sai) {
+      const def = prev - trab;
+      if (def > TOL) issues.push('Horas a menos (' + fmtMin(def) + ')');
+      else if (trab - prev > TOL) extra = trab - prev;
+    }
+    // pausa de refeição
+    if ((p.interv || 0) > 0) {
+      if (!pausa && !volta) issues.push('Pausa não registrada');
+      else if (pausa && !volta) issues.push('Pausa em aberto');
+      else if (pausa && volta) {
+        const pr = Math.round((volta.ts - pausa.ts) / 60000);
+        if (pr < p.interv - TOL) issues.push('Pausa curta (' + fmtMin(pr) + ' de ' + fmtMin(p.interv) + ')');
+      }
+    }
+    status = issues.length ? 'problema' : 'ok';
+  }
+  const ok = status === 'ok';
+  return { p, ent, pausa, volta, sai, prev, trab, extra, falta, issues, ok, status };
 }
-const STATUS_BADGE = {
-  folga: '<span class="badge bd-gy">Folga</span>',
-  falta: '<span class="badge bd-rd">Falta</span>',
-  aberto: '<span class="badge bd-am">Sem saída</span>',
-  ok: '<span class="badge bd-gr">OK</span>',
-  extra: '<span class="badge bd-bl">Extra (folga)</span>',
-};
+function renderStatus(c) {
+  if (c.status === 'folga') return '<span class="badge bd-gy">Folga</span>';
+  if (c.status === 'extra') return '<span class="badge bd-bl">Extra (folga)</span>';
+  if (c.ok) return '<span class="badge bd-gr">OK</span>';
+  return c.issues.map(i => `<span class="badge ${/^(Falta|Sem )/.test(i) ? 'bd-rd' : 'bd-am'}">${i}</span>`).join(' ');
+}
 async function relFunc(funcs) {
   if (!funcs.length) { document.getElementById('rel-body').innerHTML = emptyCard('Sem funcionários.'); return; }
   if (!State.repFunc || !funcs.find(f => f.id === State.repFunc)) State.repFunc = funcs[0].id;
@@ -680,7 +699,7 @@ async function relFunc(funcs) {
       <td class="mono">${fh(c.ent)}</td><td class="mono mut">${fh(c.pausa)}</td><td class="mono mut">${fh(c.volta)}</td><td class="mono">${fh(c.sai)}</td>
       <td class="mono">${c.trab ? fmtMin(c.trab) : '—'}</td>
       <td class="mono" style="color:${c.extra ? 'var(--bl)' : 'var(--mut)'}">${c.extra ? fmtMin(c.extra) : '—'}</td>
-      <td>${STATUS_BADGE[c.status]}</td></tr>`;
+      <td>${renderStatus(c)}</td></tr>`;
   }
   const meta = State.cfg.metaHoras * 60;
   document.getElementById('rel-body').innerHTML = `
@@ -764,7 +783,7 @@ function folhaHTML(func, escMes, regs, monthDate) {
     const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const c = computeDia(func, escMes, regs, dateStr);
     prevTot += c.prev; trabTot += c.trab; extraTot += c.extra; if (c.falta) faltas++;
-    const obs = { folga: 'Folga', falta: 'FALTA', aberto: 'Sem saída', ok: '', extra: 'Extra' }[c.status];
+    const obs = c.status === 'folga' ? 'Folga' : c.status === 'extra' ? 'Extra' : c.ok ? '' : c.issues.join(' · ');
     rows += `<tr class="${c.falta ? 'falta' : ''} ${!c.p.on ? 'folga' : ''}">
       <td>${String(d).padStart(2, '0')}/${String(m + 1).padStart(2, '0')}</td><td>${DOW[parseYmd(dateStr).getDay()]}</td>
       <td>${c.p.on ? c.p.ini + '-' + c.p.fim : '—'}</td><td>${hh(c.ent)}</td><td>${hh(c.pausa)}</td><td>${hh(c.volta)}</td><td>${hh(c.sai)}</td>

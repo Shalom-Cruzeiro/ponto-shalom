@@ -160,7 +160,7 @@ app.put('/api/loja/senha', auth, (req, res) => {
 });
 
 /* preparar ponto: calcula próximo tipo + tolerância (timezone SP) */
-function prepararPonto(lojaId, funcId) {
+function prepararPonto(lojaId, funcId, tipoPedido) {
   const { data, min } = nowSP();
   const mk = data.slice(0, 7);
   const funcs = getKV(`func:${lojaId}`) || [];
@@ -170,18 +170,22 @@ function prepararPonto(lojaId, funcId) {
   const regs = getKV(`reg:${lojaId}:${mk}`) || [];
   const done = regs.filter(r => r.funcId === funcId && r.data === data).map(r => r.tipo);
   const ordem = ['entrada', 'pausa', 'volta', 'saida'];
-  const tipo = ordem.find(t => !done.includes(t)) || null;
+  // usa o tipo pedido; se não vier, pega o próximo da ordem
+  const tipo = (tipoPedido && ordem.includes(tipoPedido)) ? tipoPedido : (ordem.find(t => !done.includes(t)) || null);
   const plano = planoDia(f, escMes, data);
   if (!tipo) return { concluido: true, nome: f.nome };
+  if (done.includes(tipo)) return { jaRegistrado: true, tipo, nome: f.nome };
+  // tolerância só bloqueia a ENTRADA antecipada — saída e demais nunca bloqueiam
   if (tipo === 'entrada' && plano.on && plano.ini) {
     const lim = toMin(plano.ini) - (cfg().tolerancia || 0);
     if (min < lim) return { blocked: true, nome: f.nome, ini: plano.ini, faltam: toMin(plano.ini) - min,
       message: `Ainda não iniciou sua jornada, aproveite seu período de descanso! Seu horário começa às ${plano.ini}.` };
   }
-  return { tipo, plano, nome: f.nome, data };
+  return { tipo, plano, nome: f.nome, data, semEntrada: tipo !== 'entrada' && !done.includes('entrada') };
 }
+function addOcor(lojaId, o) { const k = `ocor:${lojaId}`; const arr = getKV(k) || []; arr.push(o); setKV(k, arr); }
 app.post('/api/punch/prepare', auth, (req, res) => {
-  try { res.json(prepararPonto(req.sess.lojaId, req.body.funcId)); }
+  try { res.json(prepararPonto(req.sess.lojaId, req.body.funcId, req.body.tipo)); }
   catch (e) { console.error('prepare', e); res.status(500).json({ error: String(e && e.message || e) }); }
 });
 
@@ -190,8 +194,9 @@ app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
  try {
   const lojaId = req.sess.lojaId;
   const funcId = req.body.funcId;
-  const prep = prepararPonto(lojaId, funcId);
+  const prep = prepararPonto(lojaId, funcId, req.body.tipo);
   if (prep.erro) return res.status(400).json({ error: prep.erro });
+  if (prep.jaRegistrado) return res.json(prep);
   if (prep.blocked) return res.json(prep);
   if (prep.concluido) return res.status(400).json({ error: 'dia_concluido' });
 
@@ -207,10 +212,20 @@ app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
     } catch (e) { console.error('foto', e.message); }
   }
   const regs = getKV(`reg:${lojaId}:${mk}`) || [];
+  const tinhaEntrada = regs.some(r => r.funcId === funcId && r.data === data && r.tipo === 'entrada');
   const reg = { id: regId, funcId, tipo: prep.tipo, data, hora, ts, foto };
   regs.push(reg);
   setKV(`reg:${lojaId}:${mk}`, regs);
-  res.json({ ok: true, reg });
+
+  // saída sem entrada registrada no dia -> gera ocorrência automática
+  let ocorrencia = false;
+  if (prep.tipo === 'saida' && !tinhaEntrada) {
+    addOcor(lojaId, { id: 'o' + ts, funcId, data, tipo: 'Esquecimento de ponto',
+      de: '', ate: hora, motivo: 'Saída registrada sem entrada no dia',
+      obs: 'Ocorrência gerada automaticamente pelo sistema.', criadoEm: ts });
+    ocorrencia = true;
+  }
+  res.json({ ok: true, reg, ocorrencia });
  } catch (e) { console.error('punch', e); res.status(500).json({ error: String(e && e.message || e) }); }
 });
 
