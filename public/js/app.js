@@ -923,19 +923,19 @@ function kpi(lbl, val, c) { return `<div class="card cpad"><div class="lbl mut" 
 function emptyCard(t) { return `<div class="card"><div class="empty"><i class="ti ti-mood-empty"></i>${t}</div></div>`; }
 
 /* ---------- Folha de ponto (impressão / PDF com assinatura) ---------- */
-const FOLHA_CSS = `*{box-sizing:border-box}
-body{font-family:Arial,Helvetica,sans-serif;color:#0F1C2E;margin:22px;font-size:12px}
-.fp{max-width:1000px;margin:0 auto}.fp + .fp{page-break-before:always;padding-top:10px}
-.fhead{display:flex;justify-content:space-between;border-bottom:2px solid #2B59D6;padding-bottom:8px;margin-bottom:10px}
-.fhead h1{font-size:16px;margin:0}.sub{font-size:11px;color:#5b6b82;margin-top:2px}
-.meta{display:flex;gap:30px;margin:10px 0 14px}.meta span{display:block;font-size:9px;color:#7A8AA0;text-transform:uppercase;letter-spacing:.05em}.meta b{font-size:13px}
+const FOLHA_CSS = `@page{size:A4;margin:8mm}
+*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#0F1C2E;margin:0;font-size:11px}
+.fp{margin:0 auto}.fp + .fp{page-break-before:always}
+.fhead{display:flex;justify-content:space-between;border-bottom:2px solid #2B59D6;padding-bottom:6px;margin-bottom:7px}
+.fhead h1{font-size:15px;margin:0}.sub{font-size:10px;color:#5b6b82;margin-top:1px}
+.meta{display:flex;gap:26px;margin:7px 0 8px}.meta span{display:block;font-size:8px;color:#7A8AA0;text-transform:uppercase;letter-spacing:.05em}.meta b{font-size:12px}
 .ft{width:100%;border-collapse:collapse}
-.ft th{background:#f1f4f9;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#5b6b82;padding:5px 6px;border:1px solid #e0e6ef;text-align:left}
-.ft td{padding:4px 6px;border:1px solid #e9edf3;font-variant-numeric:tabular-nums}
-.ft tr.folga td{color:#9aa7ba}.ft tr.falta td{background:#fdeceb}.ft td.st{font-size:10px;font-weight:bold}
-.ft tfoot td{font-weight:bold;background:#f7f9fc;border:1px solid #e0e6ef;padding:6px}
-.sign{display:flex;gap:50px;margin-top:46px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px;font-size:11px}
-@media print{body{margin:10mm}}`;
+.ft th{background:#f1f4f9;font-size:8px;text-transform:uppercase;letter-spacing:.02em;color:#5b6b82;padding:3px 5px;border:1px solid #e0e6ef;text-align:left}
+.ft td{padding:1.5px 5px;border:1px solid #e9edf3;font-variant-numeric:tabular-nums;line-height:1.15}
+.ft tr.folga td{color:#9aa7ba}.ft tr.falta td{background:#fdeceb}.ft td.st{font-size:9px;font-weight:bold}
+.ft tfoot td{font-weight:bold;background:#f7f9fc;border:1px solid #e0e6ef;padding:4px 5px}
+.sign{display:flex;gap:50px;margin-top:24px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:5px;font-size:10px}`;
 
 function folhaHTML(func, escMes, regs, monthDate) {
   const y = monthDate.getFullYear(), m = monthDate.getMonth(), days = new Date(y, m + 1, 0).getDate();
