@@ -97,7 +97,7 @@ function auth(req, res, next) {
   if (!s) return res.status(401).json({ error: 'sessao_expirada' });
   req.sess = s; next();
 }
-function lojaDaKey(key) { const m = key.match(/^(?:func|escala|reg|ocor):(L\d+)/); return m ? m[1] : null; }
+function lojaDaKey(key) { const m = key.match(/^(?:func|escala|reg|ocor|aviso):(L\d+)/); return m ? m[1] : null; }
 function podeAcessar(sess, key) { if (sess.role === 'master') return true; return lojaDaKey(key) === sess.lojaId; }
 
 /* =========================================================================

@@ -139,6 +139,10 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xm
 .pe-chip i{font-size:14px}
 .pe-chip.done{color:#0a6e3e;background:var(--gr-soft);border-color:#bfe6cf}
 .back-list{align-self:flex-start}
+.aviso-box{background:var(--bl-soft);border:1px solid #d4e0fb;border-radius:12px;padding:14px 16px;color:var(--ink);font-size:14px;line-height:1.5;text-align:left;white-space:pre-wrap}
+.aviso-box.vazio{background:var(--bg);border:1px dashed var(--line);color:var(--mut);font-size:13px}
+.pk-aviso{background:#fff;border:1px solid var(--line);border-left:4px solid var(--bl);border-radius:12px;padding:15px 18px;display:flex;gap:13px;align-items:flex-start;box-shadow:var(--sh);font-size:15.5px;line-height:1.5;color:var(--ink)}
+.pk-aviso i{font-size:23px;color:var(--bl);flex:none;margin-top:1px}
 .emp{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:24px 28px 28px;display:flex;flex-direction:column;gap:24px;flex:1 1 480px;max-width:580px;box-shadow:0 4px 24px rgba(16,30,54,.07)}
 .emp-head{display:flex;align-items:center;gap:16px}
 .ava.xl{width:64px;height:64px;border-radius:19px;font-size:24px}

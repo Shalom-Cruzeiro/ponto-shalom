@@ -26,6 +26,8 @@ const setEsc = (lj, mk, v) => api('PUT', `/api/data/escala:${lj}:${mk}`, v);
 const getRegs = async (lj, mk) => (await api('GET', `/api/data/reg:${lj}:${mk}`)) || [];
 const getOcor = async (lj) => (await api('GET', `/api/data/ocor:${lj}`)) || [];
 const setOcor = (lj, v) => api('PUT', `/api/data/ocor:${lj}`, v);
+const getAviso = async (lj) => { const r = await api('GET', `/api/data/aviso:${lj}`); return (r && r.texto) || ''; };
+const setAviso = (lj, texto) => api('PUT', `/api/data/aviso:${lj}`, { texto });
 
 /* ============================================================
    CONSTANTES / HELPERS
@@ -159,18 +161,40 @@ setInterval(tickClocks, 1000);
 /* ============================================================
    TAB: PONTO
 ============================================================ */
-function renderPonto() {
+async function renderPonto() {
+  const aviso = await getAviso(State.loja.id);
   document.getElementById('page').innerHTML = `
-    <div class="ph"><div><h2>Registro de ponto</h2><p>Abra a tela de registro para os funcionários baterem o ponto com foto.</p></div></div>
+    <div class="ph"><div><h2>Registro de ponto</h2><p>Abra a tela de registro para os funcionários baterem o ponto.</p></div></div>
     <div class="card cpad" style="text-align:center">
       <div class="logo" style="margin:6px auto 16px"><i class="ti ti-fingerprint"></i></div>
-      <h3 style="font-size:17px;margin-bottom:6px">Tela de registro</h3>
-      <p class="mut" style="max-width:420px;margin:0 auto 18px">Modo cheio, compacto, um toque para registrar. A tolerância de ${State.cfg.tolerancia} min é aplicada na entrada.</p>
+      <h3 style="font-size:17px;margin-bottom:14px">Tela de registro</h3>
       <button class="btn p" style="padding:12px 22px" onclick="openPunch()"><i class="ti ti-player-play"></i> Abrir tela de registro</button>
+    </div>
+    <div class="card cpad" style="margin-top:14px">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><h3 style="font-size:15px;display:flex;align-items:center;gap:7px"><i class="ti ti-speakerphone" style="color:var(--bl)"></i> Comunicado da empresa</h3>
+          <p class="mut" style="font-size:12.5px;margin:4px 0 0">Aparece na tela de registro, para os funcionários verem.</p></div>
+        <button class="btn sm" onclick="editAviso()"><i class="ti ti-edit"></i> Editar</button>
+      </div>
+      <div class="aviso-box ${aviso ? '' : 'vazio'}" style="margin-top:12px">${aviso ? esc(aviso).replace(/\n/g, '<br>') : 'Nenhum comunicado no momento. Clique em “Editar” para escrever um aviso que aparecerá para os funcionários.'}</div>
     </div>`;
 }
+async function editAviso() {
+  let aviso = '';
+  try { aviso = await getAviso(State.loja.id); } catch (e) {}
+  openModal('Comunicado da empresa', `
+    <div><label class="fl">Mensagem</label>
+      <textarea id="av-txt" class="inp" rows="4" placeholder="Ex.: Reunião de equipe sexta às 9h. Novo uniforme disponível no estoque.">${esc(aviso)}</textarea></div>
+    <p class="mut" style="font-size:12px">Aparece na tela de registro de ponto. Deixe em branco para não exibir nada.</p>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar comunicado', cls: 'p', fn: 'saveAviso()' }]);
+}
+async function saveAviso() {
+  const txt = document.getElementById('av-txt').value.trim();
+  try { await setAviso(State.loja.id, txt); closeModal(); renderPonto(); toast('Comunicado salvo', 'ok'); }
+  catch (e) { toast('Erro ao salvar: ' + e.message, 'err'); }
+}
 
-let PUNCH = { funcs: [], escMes: {}, regs: [], mk: null, selected: null };
+let PUNCH = { funcs: [], escMes: {}, regs: [], mk: null, selected: null, aviso: '' };
 async function openPunch() {
   const mk = monthKey(new Date());
   PUNCH.mk = mk; PUNCH.selected = null;
@@ -178,6 +202,7 @@ async function openPunch() {
     PUNCH.funcs = await getFuncs(State.loja.id);
     PUNCH.escMes = await getEsc(State.loja.id, mk);
     PUNCH.regs = await getRegs(State.loja.id, mk);
+    PUNCH.aviso = await getAviso(State.loja.id);
   } catch (e) { toast('Não consegui carregar a loja: ' + e.message, 'err'); return; }
   document.getElementById('pk-loja').textContent = State.loja.nome;
   document.getElementById('punch-screen').classList.remove('hide');
@@ -222,6 +247,7 @@ function renderPunchSelect() {
     </button>`;
   }).join('');
   document.getElementById('pk-grid').innerHTML = `<div class="pk-wrap">
+    ${PUNCH.aviso ? `<div class="pk-aviso"><i class="ti ti-speakerphone"></i><span>${esc(PUNCH.aviso).replace(/\n/g, '<br>')}</span></div>` : ''}
     <div class="pk-hint"><i class="ti ti-hand-finger"></i> Toque no seu nome para registrar o ponto</div>
     <div class="emp-select">${tiles}</div>
   </div>`;
