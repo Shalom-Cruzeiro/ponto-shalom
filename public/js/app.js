@@ -178,7 +178,7 @@ async function openPunch() {
     PUNCH.funcs = await getFuncs(State.loja.id);
     PUNCH.escMes = await getEsc(State.loja.id, mk);
     PUNCH.regs = await getRegs(State.loja.id, mk);
-  } catch (e) { return; }
+  } catch (e) { toast('Não consegui carregar a loja: ' + e.message, 'err'); return; }
   document.getElementById('pk-loja').textContent = State.loja.nome;
   document.getElementById('punch-screen').classList.remove('hide');
   tickClocks(); renderPunchGrid();
@@ -215,9 +215,11 @@ function renderPunchGrid() {
 let CAM = { stream: null, funcId: null, tipo: null };
 async function startCapture(funcId) {
   let prep;
-  try { prep = await api('POST', '/api/punch/prepare', { funcId }); } catch (e) { return; }
+  try { prep = await api('POST', '/api/punch/prepare', { funcId }); }
+  catch (e) { toast('Não consegui registrar: ' + e.message, 'err'); return; }
+  if (prep.erro) { toast('Erro: ' + prep.erro, 'err'); return; }
   if (prep.blocked) { openCapBlock(prep); return; }
-  if (prep.concluido || !prep.tipo) { toast('Dia já concluído', 'warn'); return; }
+  if (prep.concluido || !prep.tipo) { toast('Dia já concluído para este funcionário', 'warn'); return; }
   CAM = { stream: null, funcId, tipo: prep.tipo };
   openCapUI(prep);
 }
@@ -628,6 +630,27 @@ function realDoDia(rday) {
   let real = (sai.ts - ent.ts) / 60000; if (pa && vo) real -= (vo.ts - pa.ts) / 60000;
   return Math.max(0, Math.round(real));
 }
+/* resumo de um dia: previsto, trabalhado (sem pausa), extras, status */
+function computeDia(func, escMes, regs, dateStr) {
+  const p = planoDia(func, escMes, dateStr);
+  const rday = regs.filter(r => r.funcId === func.id && r.data === dateStr).sort((a, b) => a.ts - b.ts);
+  const ent = rday.find(r => r.tipo === 'entrada'), pausa = rday.find(r => r.tipo === 'pausa'),
+        volta = rday.find(r => r.tipo === 'volta'), sai = rday.find(r => r.tipo === 'saida');
+  const prev = dur(p), trab = realDoDia(rday);
+  let extra = 0, falta = false, status;
+  if (!p.on) { status = (ent && sai) ? 'extra' : 'folga'; if (ent && sai) extra = trab; }
+  else if (!ent) { status = 'falta'; falta = true; }
+  else if (!sai) { status = 'aberto'; }
+  else { status = 'ok'; extra = Math.max(0, trab - prev); }
+  return { p, ent, pausa, volta, sai, prev, trab, extra, falta, status };
+}
+const STATUS_BADGE = {
+  folga: '<span class="badge bd-gy">Folga</span>',
+  falta: '<span class="badge bd-rd">Falta</span>',
+  aberto: '<span class="badge bd-am">Sem saída</span>',
+  ok: '<span class="badge bd-gr">OK</span>',
+  extra: '<span class="badge bd-bl">Extra (folga)</span>',
+};
 async function relFunc(funcs) {
   if (!funcs.length) { document.getElementById('rel-body').innerHTML = emptyCard('Sem funcionários.'); return; }
   if (!State.repFunc || !funcs.find(f => f.id === State.repFunc)) State.repFunc = funcs[0].id;
@@ -636,40 +659,36 @@ async function relFunc(funcs) {
   const escMes = await getEsc(State.loja.id, mk);
   const regs = await getRegs(State.loja.id, mk);
   const y = State.repMonth.getFullYear(), m = State.repMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
-  let prevTot = 0, realTot = 0, faltas = 0, rows = '';
+  let prevTot = 0, trabTot = 0, extraTot = 0, faltas = 0, rows = '';
+  const fh = d => d ? d.hora : '—';
   for (let d = 1; d <= days; d++) {
     const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const p = planoDia(func, escMes, dateStr);
-    const rday = regs.filter(r => r.funcId === func.id && r.data === dateStr).sort((a, b) => a.ts - b.ts);
-    const ent = rday.find(r => r.tipo === 'entrada'), sai = rday.find(r => r.tipo === 'saida');
-    const prev = dur(p); prevTot += prev;
-    const real = realDoDia(rday); realTot += real;
-    let st;
-    if (!p.on) st = '<span class="badge bd-gy">Folga</span>';
-    else if (!ent) { st = '<span class="badge bd-rd">Falta</span>'; faltas++; }
-    else if (!sai) st = '<span class="badge bd-am">Sem saída</span>';
-    else st = '<span class="badge bd-gr">OK</span>';
-    if (!p.on && !ent) continue;
+    const c = computeDia(func, escMes, regs, dateStr);
+    prevTot += c.prev; trabTot += c.trab; extraTot += c.extra; if (c.falta) faltas++;
+    if (!c.p.on && !c.ent) continue;
     rows += `<tr><td class="mono">${String(d).padStart(2, '0')}/${String(m + 1).padStart(2, '0')} ${DOW[parseYmd(dateStr).getDay()]}</td>
-      <td class="mono">${p.on ? p.ini + '–' + p.fim : '—'}</td>
-      <td class="mono">${ent ? ent.hora : '—'}</td><td class="mono">${sai ? sai.hora : '—'}</td>
-      <td class="mono">${prev ? fmtMin(prev) : '—'}</td><td class="mono">${real ? fmtMin(real) : '—'}</td><td>${st}</td></tr>`;
+      <td class="mono">${c.p.on ? c.p.ini + '–' + c.p.fim : '—'}</td>
+      <td class="mono">${fh(c.ent)}</td><td class="mono mut">${fh(c.pausa)}</td><td class="mono mut">${fh(c.volta)}</td><td class="mono">${fh(c.sai)}</td>
+      <td class="mono">${c.trab ? fmtMin(c.trab) : '—'}</td>
+      <td class="mono" style="color:${c.extra ? 'var(--bl)' : 'var(--mut)'}">${c.extra ? fmtMin(c.extra) : '—'}</td>
+      <td>${STATUS_BADGE[c.status]}</td></tr>`;
   }
   const meta = State.cfg.metaHoras * 60;
   document.getElementById('rel-body').innerHTML = `
-    <div class="row noprint" style="margin-bottom:14px">
+    <div class="row noprint" style="margin-bottom:14px;justify-content:space-between">
       <select class="inp" style="width:auto" onchange="State.repFunc=this.value;renderRel()">
         ${funcs.map(f => `<option value="${f.id}" ${f.id === State.repFunc ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}</select>
+      <button class="btn p sm" onclick="gerarFolhaFunc('${func.id}')"><i class="ti ti-file-text"></i> Folha de ponto (assinatura)</button>
     </div>
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px">
       ${kpi('Previsto', fmtH(prevTot), prevTot >= meta ? 'gr' : 'am')}
-      ${kpi('Realizado', fmtH(realTot), 'bl')}
+      ${kpi('Trabalhado', fmtH(trabTot), 'ink')}
+      ${kpi('Horas extras', fmtH(extraTot), extraTot ? 'bl' : 'mut')}
       ${kpi('Faltas', faltas, faltas ? 'rd' : 'gr')}
-      ${kpi('Meta', State.cfg.metaHoras + 'h', prevTot >= meta ? 'gr' : 'am')}
     </div>
-    <div class="card"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(func.nome)}</b> <span class="mut">· ${esc(func.cargo || '')}</span></div>
-    <table class="tbl"><thead><tr><th>Dia</th><th>Previsto</th><th>Entrada</th><th>Saída</th><th>H. prev.</th><th>H. real</th><th>Status</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="7" class="empty">Sem registros neste mês.</td></tr>`}</tbody></table></div>`;
+    <div class="card" style="overflow-x:auto"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(func.nome)}</b> <span class="mut">· ${esc(func.cargo || '')}</span></div>
+    <table class="tbl"><thead><tr><th>Dia</th><th>Turno</th><th>Entrada</th><th>Pausa</th><th>Retorno</th><th>Saída</th><th>Trab.</th><th>Extra</th><th>Status</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="9" class="empty">Sem registros neste mês.</td></tr>`}</tbody></table></div>`;
 }
 async function relLoja(funcs) {
   const mk = monthKey(State.repMonth);
@@ -678,38 +697,112 @@ async function relLoja(funcs) {
   const ocs = await getOcor(State.loja.id);
   const y = State.repMonth.getFullYear(), m = State.repMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
   const meta = State.cfg.metaHoras * 60;
-  let rows = '', totPrev = 0, totReal = 0, totFalt = 0;
+  let rows = '', totPrev = 0, totTrab = 0, totExtra = 0, totFalt = 0;
   for (const func of funcs) {
-    let prev = 0, real = 0, falt = 0;
+    let prev = 0, trab = 0, extra = 0, falt = 0;
     for (let d = 1; d <= days; d++) {
       const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const p = planoDia(func, escMes, dateStr); prev += dur(p);
-      const rday = regs.filter(r => r.funcId === func.id && r.data === dateStr).sort((a, b) => a.ts - b.ts);
-      const ent = rday.find(r => r.tipo === 'entrada');
-      if (p.on && !ent) falt++;
-      real += realDoDia(rday);
+      const c = computeDia(func, escMes, regs, dateStr);
+      prev += c.prev; trab += c.trab; extra += c.extra; if (c.falta) falt++;
     }
     const noc = ocs.filter(o => o.funcId === func.id && o.data.startsWith(mk)).length;
-    totPrev += prev; totReal += real; totFalt += falt;
+    totPrev += prev; totTrab += trab; totExtra += extra; totFalt += falt;
     rows += `<tr><td><div class="row" style="gap:8px"><div class="ava" style="background:${avColor(func.nome)};width:30px;height:30px;border-radius:8px;font-size:11px">${initials(func.nome)}</div><b>${esc(func.nome)}</b></div></td>
-      <td class="mono">${fmtH(prev)}</td><td class="mono">${fmtH(real)}</td>
+      <td class="mono">${fmtH(prev)}</td><td class="mono">${fmtH(trab)}</td>
+      <td class="mono" style="color:${extra ? 'var(--bl)' : 'var(--mut)'}">${extra ? fmtH(extra) : '—'}</td>
       <td>${falt ? `<span class="badge bd-rd">${falt}</span>` : '<span class="mut">0</span>'}</td>
-      <td>${noc ? `<span class="badge bd-gy">${noc}</span>` : '<span class="mut">0</span>'}</td>
-      <td>${prev >= meta ? '<span class="badge bd-gr">OK</span>' : '<span class="badge bd-am">Abaixo</span>'}</td></tr>`;
+      <td>${noc ? `<span class="badge bd-gy">${noc}</span>` : '<span class="mut">0</span>'}</td></tr>`;
   }
   document.getElementById('rel-body').innerHTML = `
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
-      ${kpi('Funcionários', funcs.length, 'bl')}
-      ${kpi('Total previsto', fmtH(totPrev), 'gr')}
-      ${kpi('Total realizado', fmtH(totReal), 'bl')}
+    <div class="row noprint" style="margin-bottom:14px;justify-content:flex-end">
+      <button class="btn p sm" onclick="gerarFolhaLoja()"><i class="ti ti-files"></i> Folhas de ponto da loja (todos)</button>
+    </div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:14px">
+      ${kpi('Funcionários', funcs.length, 'ink')}
+      ${kpi('Previsto', fmtH(totPrev), 'gr')}
+      ${kpi('Trabalhado', fmtH(totTrab), 'ink')}
+      ${kpi('Horas extras', fmtH(totExtra), totExtra ? 'bl' : 'mut')}
       ${kpi('Faltas', totFalt, totFalt ? 'rd' : 'gr')}
     </div>
-    <div class="card"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(State.loja.nome)}</b> <span class="mut">· ${capWord(State.repMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</span></div>
-    <table class="tbl"><thead><tr><th>Funcionário</th><th>Previsto</th><th>Realizado</th><th>Faltas</th><th>Ocorr.</th><th>Meta</th></tr></thead>
+    <div class="card" style="overflow-x:auto"><div class="cpad" style="border-bottom:1px solid var(--line2)"><b>${esc(State.loja.nome)}</b> <span class="mut">· ${capWord(State.repMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</span></div>
+    <table class="tbl"><thead><tr><th>Funcionário</th><th>Previsto</th><th>Trabalhado</th><th>Extras</th><th>Faltas</th><th>Ocorr.</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="6" class="empty">Sem funcionários.</td></tr>`}</tbody></table></div>`;
 }
 function kpi(lbl, val, c) { return `<div class="card cpad"><div class="lbl mut" style="font-size:11px;text-transform:uppercase;letter-spacing:.04em">${lbl}</div><div class="mono" style="font-size:24px;font-weight:700;color:var(--${c})">${val}</div></div>`; }
 function emptyCard(t) { return `<div class="card"><div class="empty"><i class="ti ti-mood-empty"></i>${t}</div></div>`; }
+
+/* ---------- Folha de ponto (impressão / PDF com assinatura) ---------- */
+const FOLHA_CSS = `*{box-sizing:border-box}
+body{font-family:Arial,Helvetica,sans-serif;color:#0F1C2E;margin:22px;font-size:12px}
+.fp{max-width:1000px;margin:0 auto}.fp + .fp{page-break-before:always;padding-top:10px}
+.fhead{display:flex;justify-content:space-between;border-bottom:2px solid #2B59D6;padding-bottom:8px;margin-bottom:10px}
+.fhead h1{font-size:16px;margin:0}.sub{font-size:11px;color:#5b6b82;margin-top:2px}
+.meta{display:flex;gap:30px;margin:10px 0 14px}.meta span{display:block;font-size:9px;color:#7A8AA0;text-transform:uppercase;letter-spacing:.05em}.meta b{font-size:13px}
+.ft{width:100%;border-collapse:collapse}
+.ft th{background:#f1f4f9;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#5b6b82;padding:5px 6px;border:1px solid #e0e6ef;text-align:left}
+.ft td{padding:4px 6px;border:1px solid #e9edf3;font-variant-numeric:tabular-nums}
+.ft tr.folga td{color:#9aa7ba}.ft tr.falta td{background:#fdeceb}.ft td.st{font-size:10px;font-weight:bold}
+.ft tfoot td{font-weight:bold;background:#f7f9fc;border:1px solid #e0e6ef;padding:6px}
+.sign{display:flex;gap:50px;margin-top:46px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px;font-size:11px}
+@media print{body{margin:10mm}}`;
+
+function folhaHTML(func, escMes, regs, monthDate) {
+  const y = monthDate.getFullYear(), m = monthDate.getMonth(), days = new Date(y, m + 1, 0).getDate();
+  const mesNome = capWord(monthDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+  const hh = d => d ? d.hora : '';
+  let prevTot = 0, trabTot = 0, extraTot = 0, faltas = 0, rows = '';
+  for (let d = 1; d <= days; d++) {
+    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const c = computeDia(func, escMes, regs, dateStr);
+    prevTot += c.prev; trabTot += c.trab; extraTot += c.extra; if (c.falta) faltas++;
+    const obs = { folga: 'Folga', falta: 'FALTA', aberto: 'Sem saída', ok: '', extra: 'Extra' }[c.status];
+    rows += `<tr class="${c.falta ? 'falta' : ''} ${!c.p.on ? 'folga' : ''}">
+      <td>${String(d).padStart(2, '0')}/${String(m + 1).padStart(2, '0')}</td><td>${DOW[parseYmd(dateStr).getDay()]}</td>
+      <td>${c.p.on ? c.p.ini + '-' + c.p.fim : '—'}</td><td>${hh(c.ent)}</td><td>${hh(c.pausa)}</td><td>${hh(c.volta)}</td><td>${hh(c.sai)}</td>
+      <td>${c.trab ? fmtMin(c.trab) : ''}</td><td>${c.extra ? fmtMin(c.extra) : ''}</td><td class="st">${obs}</td></tr>`;
+  }
+  const saldo = trabTot - prevTot;
+  return `<div class="fp">
+    <div class="fhead"><div><h1>Folha de Ponto</h1><div class="sub">Grupo Shalom · ${esc(State.loja.nome)}</div></div>
+      <div style="text-align:right"><div class="sub">${mesNome}</div></div></div>
+    <div class="meta">
+      <div><span>Funcionário</span><b>${esc(func.nome)}</b></div>
+      <div><span>Cargo</span><b>${esc(func.cargo || '—')}</b></div>
+      <div><span>Meta mensal</span><b>${State.cfg.metaHoras}h</b></div></div>
+    <table class="ft"><thead><tr><th>Dia</th><th>Sem.</th><th>Turno</th><th>Entrada</th><th>Pausa</th><th>Retorno</th><th>Saída</th><th>Trab.</th><th>Extra</th><th>Obs.</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="7">Totais — Trabalhadas / Extras / Faltas</td><td>${fmtH(trabTot)}</td><td>${fmtH(extraTot)}</td><td>${faltas}</td></tr>
+        <tr><td colspan="10">Previsto no mês: ${fmtH(prevTot)} &nbsp;·&nbsp; Saldo: ${saldo >= 0 ? '+' : '−'}${fmtH(Math.abs(saldo))} ${saldo >= 0 ? '(crédito)' : '(a compensar)'}</td></tr>
+      </tfoot></table>
+    <p style="font-size:10px;color:#7A8AA0;margin-top:8px">A pausa de refeição (Pausa → Retorno) não é contada nas horas trabalhadas.</p>
+    <div class="sign"><div>Assinatura do funcionário</div><div>Assinatura do gerente</div></div>
+  </div>`;
+}
+function abrirImpressao(corpo) {
+  const w = window.open('', '_blank');
+  if (!w) { toast('Permita pop-ups no navegador para gerar a folha', 'warn'); return; }
+  w.document.write(`<html><head><meta charset="utf-8"><title>Folha de Ponto</title><style>${FOLHA_CSS}</style></head><body>${corpo}<script>window.onload=function(){window.print()}<\/script></body></html>`);
+  w.document.close();
+}
+async function gerarFolhaFunc(funcId) {
+  try {
+    const funcs = await getFuncs(State.loja.id);
+    const func = funcs.find(f => f.id === funcId);
+    const mk = monthKey(State.repMonth);
+    const escMes = await getEsc(State.loja.id, mk), regs = await getRegs(State.loja.id, mk);
+    abrirImpressao(folhaHTML(func, escMes, regs, State.repMonth));
+  } catch (e) { toast('Erro ao gerar folha: ' + e.message, 'err'); }
+}
+async function gerarFolhaLoja() {
+  try {
+    const funcs = await getFuncs(State.loja.id);
+    if (!funcs.length) { toast('Sem funcionários', 'warn'); return; }
+    const mk = monthKey(State.repMonth);
+    const escMes = await getEsc(State.loja.id, mk), regs = await getRegs(State.loja.id, mk);
+    abrirImpressao(funcs.map(f => folhaHTML(f, escMes, regs, State.repMonth)).join(''));
+  } catch (e) { toast('Erro ao gerar folhas: ' + e.message, 'err'); }
+}
 
 /* ============================================================
    TAB: CONFIG

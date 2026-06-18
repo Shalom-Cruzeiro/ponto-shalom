@@ -10,6 +10,7 @@
      então nada é perdido em deploy/restart.
 ========================================================================= */
 const express = require('express');
+const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const multer = require('multer');
 const sharp = require('sharp');
@@ -68,12 +69,22 @@ function planoDia(func, escMes, dateStr) {
   return (func.padrao && func.padrao[dow]) ? func.padrao[dow] : { on: false };
 }
 
-/* ---- auth simples por token em memória ---- */
-const tokens = new Map();
-const randTok = () => 'tk_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+/* ---- auth por token assinado (sobrevive a restart/deploy) ---- */
+let SECRET = getKV('secret');
+if (!SECRET) { SECRET = crypto.randomBytes(24).toString('hex'); setKV('secret', SECRET); }
+function makeToken(lojaId, role) {
+  const body = `${lojaId}.${role}`;
+  const sig = crypto.createHmac('sha256', SECRET).update(body).digest('hex').slice(0, 24);
+  return `${body}.${sig}`;
+}
+function readToken(t) {
+  if (!t) return null;
+  const p = t.split('.'); if (p.length !== 3) return null;
+  const sig = crypto.createHmac('sha256', SECRET).update(`${p[0]}.${p[1]}`).digest('hex').slice(0, 24);
+  return sig === p[2] ? { lojaId: p[0], role: p[1] } : null;
+}
 function auth(req, res, next) {
-  const t = req.headers['x-token'] || req.query.t;
-  const s = tokens.get(t);
+  const s = readToken(req.headers['x-token'] || req.query.t);
   if (!s) return res.status(401).json({ error: 'sessao_expirada' });
   req.sess = s; next();
 }
@@ -100,8 +111,7 @@ app.post('/api/login', (req, res) => {
   if (senha === c.masterSenha) role = 'master';
   else if (senha === loja.senha) role = 'gerente';
   if (!role) return res.status(401).json({ error: 'senha_incorreta' });
-  const token = randTok();
-  tokens.set(token, { lojaId, role });
+  const token = makeToken(loja.id, role);
   res.json({ token, role, loja: { id: loja.id, nome: loja.nome },
     config: { metaHoras: c.metaHoras, tolerancia: c.tolerancia, intervaloPadrao: c.intervaloPadrao } });
 });
