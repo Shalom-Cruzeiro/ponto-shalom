@@ -45,11 +45,17 @@ function seedCfg() {
   if (getKV('cfg')) return;
   const nomes = ["Loja do Cruzeiro - Estação","Cruzeiro - Shopping","DelRey","Outlet","Centro",
     "Barreiro","Contagem","Betim","Savassi","Buritis","Pampulha","Venda Nova","Eldorado"];
-  const lojas = nomes.map((nome, i) => ({ id: 'L' + String(i + 1).padStart(2, '0'), nome, senha: '1234' }));
+  const lojas = nomes.map((nome, i) => ({ id: 'L' + String(i + 1).padStart(2, '0'), nome, senha: '1234', senhaFunc: '0000' }));
   setKV('cfg', { lojas, masterSenha: 'master2024', metaHoras: 180, tolerancia: 5, intervaloPadrao: 60 });
-  console.log('[ponto] config inicial criada (13 lojas, senha 1234)');
+  console.log('[ponto] config inicial criada (gerente 1234, funcionários 0000)');
 }
 seedCfg();
+// migração: garante senha de funcionário nas lojas já existentes
+(function migrateCfg() {
+  const c = getKV('cfg'); if (!c) return; let changed = false;
+  c.lojas.forEach(l => { if (!l.senhaFunc) { l.senhaFunc = '0000'; changed = true; } });
+  if (changed) { setKV('cfg', c); console.log('[ponto] migração: senha de funcionário (0000) adicionada às lojas'); }
+})();
 const cfg = () => getKV('cfg');
 
 /* ---- helpers de tempo (sempre America/Sao_Paulo) ---- */
@@ -119,6 +125,7 @@ app.post('/api/login', (req, res) => {
   let role = null;
   if (senha === c.masterSenha) role = 'master';
   else if (senha === loja.senha) role = 'gerente';
+  else if (senha === loja.senhaFunc) role = 'funcionario';
   if (!role) return res.status(401).json({ error: 'senha_incorreta' });
   const token = makeToken(loja.id, role);
   res.json({ token, role, loja: { id: loja.id, nome: loja.nome },
@@ -133,18 +140,22 @@ app.get('/api/data/:key', auth, (req, res) => {
 });
 app.put('/api/data/:key', auth, (req, res) => {
   const key = req.params.key;
+  if (req.sess.role === 'funcionario') return res.status(403).json({ error: 'sem_permissao' });
   if (key.startsWith('reg:')) return res.status(403).json({ error: 'reg_somente_via_ponto' });
   if (!podeAcessar(req.sess, key)) return res.status(403).json({ error: 'sem_acesso' });
   setKV(key, req.body);
   res.json({ ok: true });
 });
 
-/* config / senha */
+/* config / senha (somente gerente/master) */
 app.get('/api/config', auth, (req, res) => {
   const c = cfg();
-  res.json({ metaHoras: c.metaHoras, tolerancia: c.tolerancia, intervaloPadrao: c.intervaloPadrao });
+  const loja = c.lojas.find(l => l.id === req.sess.lojaId);
+  res.json({ metaHoras: c.metaHoras, tolerancia: c.tolerancia, intervaloPadrao: c.intervaloPadrao,
+    senha: loja ? loja.senha : '', senhaFunc: loja ? loja.senhaFunc : '' });
 });
 app.put('/api/config', auth, (req, res) => {
+  if (req.sess.role === 'funcionario') return res.status(403).json({ error: 'sem_permissao' });
   const c = cfg();
   if (req.body.metaHoras != null) c.metaHoras = +req.body.metaHoras;
   if (req.body.tolerancia != null) c.tolerancia = +req.body.tolerancia;
@@ -153,9 +164,14 @@ app.put('/api/config', auth, (req, res) => {
   res.json({ ok: true });
 });
 app.put('/api/loja/senha', auth, (req, res) => {
+  if (req.sess.role === 'funcionario') return res.status(403).json({ error: 'sem_permissao' });
   const c = cfg();
   const loja = c.lojas.find(l => l.id === req.sess.lojaId);
-  if (loja && req.body.senha) { loja.senha = String(req.body.senha); setKV('cfg', c); }
+  if (loja) {
+    if (req.body.senha) loja.senha = String(req.body.senha);
+    if (req.body.senhaFunc) loja.senhaFunc = String(req.body.senhaFunc);
+    setKV('cfg', c);
+  }
   res.json({ ok: true });
 });
 

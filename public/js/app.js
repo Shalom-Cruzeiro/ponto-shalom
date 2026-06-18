@@ -105,13 +105,21 @@ async function doLogin() {
   } catch (e) { err.textContent = 'Falha de conexão'; err.classList.remove('hide'); }
 }
 function enterApp() {
-  State.loja = SESS.loja; State.role = SESS.role; State.cfg = SESS.config;
+  State.loja = SESS.loja; State.role = SESS.role; State.cfg = SESS.config || {};
   document.getElementById('login').classList.add('hide');
+  if (SESS.role === 'funcionario') {
+    // funcionário: somente a tela de registro (quiosque), sem abas
+    document.getElementById('app').classList.add('hide');
+    openPunch();
+    return;
+  }
   document.getElementById('app').classList.remove('hide');
   document.getElementById('tb-loja').textContent = SESS.loja.nome;
   document.getElementById('tb-role').textContent = SESS.role === 'master' ? 'Acesso master' : 'Gerente da loja';
   buildTabs(); go('ponto');
 }
+const isKiosk = () => SESS && SESS.role === 'funcionario';
+function exitPunch() { if (isKiosk()) doLogout(); else closePunch(); }
 function showLogin() {
   document.getElementById('app').classList.add('hide');
   document.getElementById('punch-screen').classList.add('hide');
@@ -205,6 +213,8 @@ async function openPunch() {
     PUNCH.aviso = await getAviso(State.loja.id);
   } catch (e) { toast('Não consegui carregar a loja: ' + e.message, 'err'); return; }
   document.getElementById('pk-loja').textContent = State.loja.nome;
+  const back = document.getElementById('pk-back');
+  if (back) back.innerHTML = isKiosk() ? '<i class="ti ti-logout-2"></i> Sair' : '<i class="ti ti-arrow-left"></i> Voltar';
   document.getElementById('punch-screen').classList.remove('hide');
   tickClocks(); renderPunch();
 }
@@ -910,33 +920,42 @@ async function gerarFolhaLoja() {
 /* ============================================================
    TAB: CONFIG
 ============================================================ */
-function renderCfg() {
+async function renderCfg() {
   const c = State.cfg;
+  let senhas = { senha: '', senhaFunc: '' };
+  try { senhas = await api('GET', '/api/config'); } catch (e) {}
   document.getElementById('page').innerHTML = `
-    <div class="ph"><div><h2>Configurações</h2><p>Ajustes gerais do sistema.</p></div></div>
-    <div class="card cpad grid" style="max-width:520px;gap:16px">
+    <div class="ph"><div><h2>Configurações</h2><p>Ajustes gerais e senhas de acesso da loja.</p></div></div>
+    <div class="card cpad grid" style="max-width:560px;gap:16px">
       <div class="row" style="gap:12px">
         <div style="flex:1"><label class="fl">Meta de horas / mês</label><input id="c-meta" class="inp" type="number" value="${c.metaHoras}"></div>
         <div style="flex:1"><label class="fl">Tolerância (min)</label><input id="c-tol" class="inp" type="number" value="${c.tolerancia}"></div>
         <div style="flex:1"><label class="fl">Intervalo padrão</label><input id="c-int" class="inp" type="number" value="${c.intervaloPadrao}"></div>
       </div>
-      <div><label class="fl">Nova senha desta loja (deixe vazio para manter)</label><input id="c-senha" class="inp" type="text" placeholder="••••"></div>
+      <div style="border-top:1px solid var(--line2);padding-top:14px">
+        <h3 style="font-size:14px;margin-bottom:10px"><i class="ti ti-key" style="color:var(--bl);vertical-align:-2px"></i> Senhas de acesso desta loja</h3>
+        <div class="row" style="gap:12px">
+          <div style="flex:1"><label class="fl">Funcionários (só registra ponto)</label><input id="c-senhaf" class="inp" type="text" value="${esc(senhas.senhaFunc || '')}"></div>
+          <div style="flex:1"><label class="fl">Gerente (acesso total)</label><input id="c-senha" class="inp" type="text" value="${esc(senhas.senha || '')}"></div>
+        </div>
+        <p class="mut" style="font-size:11.5px;margin:8px 0 0">A senha dos funcionários abre apenas a tela de registro. A do gerente dá acesso a escala, relatórios, comunicado e configurações.</p>
+      </div>
       <div><button class="btn p" onclick="saveCfg()"><i class="ti ti-device-floppy"></i> Salvar configurações</button></div>
-    </div>
-    <p class="mut" style="font-size:12px;margin-top:16px;max-width:520px">Os dados ficam salvos no servidor (disco persistente do Render). Abaixo de ${c.metaHoras}h previstas, a aba Escala mostra o alerta automaticamente.</p>`;
+    </div>`;
 }
 async function saveCfg() {
   const meta = +document.getElementById('c-meta').value || 180;
   const tol = +document.getElementById('c-tol').value || 0;
   const intv = +document.getElementById('c-int').value || 0;
-  const novaSenha = document.getElementById('c-senha').value;
+  const senha = document.getElementById('c-senha').value.trim();
+  const senhaFunc = document.getElementById('c-senhaf').value.trim();
   try {
     await api('PUT', '/api/config', { metaHoras: meta, tolerancia: tol, intervaloPadrao: intv });
-    if (novaSenha) await api('PUT', '/api/loja/senha', { senha: novaSenha });
+    if (senha || senhaFunc) await api('PUT', '/api/loja/senha', { senha, senhaFunc });
     State.cfg.metaHoras = meta; State.cfg.tolerancia = tol; State.cfg.intervaloPadrao = intv;
     SESS.config = State.cfg; saveSess();
     toast('Configurações salvas', 'ok');
-  } catch (e) { toast('Erro ao salvar', 'err'); }
+  } catch (e) { toast('Erro ao salvar: ' + e.message, 'err'); }
 }
 
 /* ============================================================

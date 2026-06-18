@@ -26,13 +26,13 @@
         <select id="lg-loja" class="inp"></select>
       </div>
       <div>
-        <label class="fl">Senha do gerente</label>
+        <label class="fl">Senha de acesso</label>
         <input id="lg-senha" class="inp" type="password" placeholder="••••••" onkeydown="if(event.key==='Enter')doLogin()"/>
       </div>
       <div id="lg-err" class="badge bd-rd hide" style="width:100%;justify-content:center"></div>
       <button class="btn p full" onclick="doLogin()"><i class="ti ti-login-2"></i> Entrar</button>
     </div>
-    <div class="lfoot">Senha padrão da loja <b>1234</b> · master <b>master2024</b></div>
+    <div class="lfoot">Funcionários <b>0000</b> (só registro) · Gerente <b>1234</b> (acesso total)</div>
   </div>
 </div>
 
@@ -58,7 +58,7 @@
 <!-- ===================== PUNCH FULLSCREEN ===================== -->
 <div id="punch-screen" class="hide">
   <div class="pk-top">
-    <button class="btn sm" onclick="closePunch()"><i class="ti ti-arrow-left"></i> Voltar</button>
+    <button class="btn sm" id="pk-back" onclick="exitPunch()"><i class="ti ti-arrow-left"></i> Voltar</button>
     <div style="font-weight:700" id="pk-loja"></div>
     <div class="pk-clock">
       <div class="t mono" id="pk-time">--:--:--</div>
