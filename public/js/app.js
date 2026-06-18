@@ -19,15 +19,31 @@ async function api(method, path, body) {
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('http_' + r.status)); }
   return r.json();
 }
-const getFuncs = async (lj) => (await api('GET', `/api/data/func:${lj}`)) || [];
-const setFuncs = (lj, v) => api('PUT', `/api/data/func:${lj}`, v);
-const getEsc = async (lj, mk) => (await api('GET', `/api/data/escala:${lj}:${mk}`)) || {};
-const setEsc = (lj, mk, v) => api('PUT', `/api/data/escala:${lj}:${mk}`, v);
-const getRegs = async (lj, mk) => (await api('GET', `/api/data/reg:${lj}:${mk}`)) || [];
-const getOcor = async (lj) => (await api('GET', `/api/data/ocor:${lj}`)) || [];
-const setOcor = (lj, v) => api('PUT', `/api/data/ocor:${lj}`, v);
-const getAviso = async (lj) => { const r = await api('GET', `/api/data/aviso:${lj}`); return (r && r.texto) || ''; };
-const setAviso = (lj, texto) => api('PUT', `/api/data/aviso:${lj}`, { texto });
+/* cache em memória: evita rebuscar tudo a cada troca de funcionário/aba */
+const _cache = new Map(); // path -> { t, data }
+const CACHE_TTL = 25000;
+let _inflight = new Map(); // evita buscas duplicadas simultâneas
+async function apiGet(path) {
+  const c = _cache.get(path);
+  if (c && Date.now() - c.t < CACHE_TTL) return c.data;
+  if (_inflight.has(path)) return _inflight.get(path);
+  const pr = api('GET', path).then(data => { _cache.set(path, { t: Date.now(), data }); _inflight.delete(path); return data; })
+    .catch(e => { _inflight.delete(path); throw e; });
+  _inflight.set(path, pr);
+  return pr;
+}
+function cachePut(path, data) { _cache.set(path, { t: Date.now(), data }); }
+function cacheClear(prefixPart) { for (const k of [..._cache.keys()]) if (k.includes(prefixPart)) _cache.delete(k); }
+
+const getFuncs = async (lj) => (await apiGet(`/api/data/func:${lj}`)) || [];
+const setFuncs = async (lj, v) => { await api('PUT', `/api/data/func:${lj}`, v); cachePut(`/api/data/func:${lj}`, v); };
+const getEsc = async (lj, mk) => (await apiGet(`/api/data/escala:${lj}:${mk}`)) || {};
+const setEsc = async (lj, mk, v) => { await api('PUT', `/api/data/escala:${lj}:${mk}`, v); cachePut(`/api/data/escala:${lj}:${mk}`, v); };
+const getRegs = async (lj, mk) => (await apiGet(`/api/data/reg:${lj}:${mk}`)) || [];
+const getOcor = async (lj) => (await apiGet(`/api/data/ocor:${lj}`)) || [];
+const setOcor = async (lj, v) => { await api('PUT', `/api/data/ocor:${lj}`, v); cachePut(`/api/data/ocor:${lj}`, v); };
+const getAviso = async (lj) => { const r = await apiGet(`/api/data/aviso:${lj}`); return (r && r.texto) || ''; };
+const setAviso = async (lj, texto) => { await api('PUT', `/api/data/aviso:${lj}`, { texto }); cachePut(`/api/data/aviso:${lj}`, { texto }); };
 
 /* ============================================================
    CONSTANTES / HELPERS
@@ -388,6 +404,7 @@ async function confirmPunch(blob) {
   if (r.jaRegistrado) { toast((STEP_SHORT[r.tipo] || 'Ponto') + ' já registrado', 'warn'); closeCapture(); renderPunch(); return; }
   if (r.ok) {
     PUNCH.regs.push(r.reg);
+    cachePut(`/api/data/reg:${State.loja.id}:${PUNCH.mk}`, PUNCH.regs);
     const f = PUNCH.funcs.find(x => x.id === CAM.funcId);
     toast(`${TIPO_LBL[r.reg.tipo]} registrada · ${f.nome.split(' ')[0]} · ${r.reg.hora}`, 'ok');
     if (r.ocorrencia) setTimeout(() => toast('Saída sem entrada — ocorrência gerada automaticamente', 'warn'), 1300);
