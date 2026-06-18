@@ -88,7 +88,8 @@ function toast(msg, kind = 'ok') {
    STATE
 ============================================================ */
 const State = { loja: null, role: 'gerente', cfg: null, tab: 'ponto',
-  calMonth: new Date(), calFunc: null, repMonth: new Date(), repFunc: null, repMode: 'func' };
+  calMonth: new Date(), calFunc: null, repMonth: new Date(), repFunc: null, repMode: 'func',
+  ocorFiltro: { status: 'todas', func: 'todos' } };
 
 function planoDia(func, escMes, dateStr) {
   if (escMes && escMes[func.id] && escMes[func.id][dateStr]) return escMes[func.id][dateStr];
@@ -680,13 +681,29 @@ async function renderOcor() {
   let ocs;
   try { ocs = await scanOcorrencias(); } catch (e) { ocs = await getOcor(State.loja.id); }
   ocs = ocs.slice().sort((a, b) => (a.status === 'aberta' ? 0 : 1) - (b.status === 'aberta' ? 0 : 1) || (b.criadoEm || 0) - (a.criadoEm || 0));
-  const abertas = ocs.filter(o => o.status !== 'respondida').length;
+  const totalAbertas = ocs.filter(o => o.status !== 'respondida').length;
+  const ft = State.ocorFiltro;
+  const lista = ocs.filter(o =>
+    (ft.status === 'todas' || (ft.status === 'aberta' ? o.status !== 'respondida' : o.status === 'respondida')) &&
+    (ft.func === 'todos' || o.funcId === ft.func));
   document.getElementById('page').innerHTML = `
-    <div class="ph"><div><h2>Ocorrências de ponto</h2><p>${abertas ? `<b style="color:var(--rd)">${abertas} aberta(s)</b> aguardando justificativa.` : 'Tudo justificado.'}</p></div>
+    <div class="ph"><div><h2>Ocorrências de ponto</h2><p>${totalAbertas ? `<b style="color:var(--rd)">${totalAbertas} aberta(s)</b> aguardando justificativa.` : 'Tudo justificado.'}</p></div>
       <div class="row"><button class="btn p" onclick="novaOcor()" ${funcs.length ? '' : 'disabled'}><i class="ti ti-file-plus"></i> Nova ocorrência</button></div></div>
+    <div class="row" style="gap:10px;margin-bottom:14px">
+      <div class="seg">
+        <button class="${ft.status === 'todas' ? 'on' : ''}" onclick="setOcorFiltro('status','todas')">Todas</button>
+        <button class="${ft.status === 'aberta' ? 'on' : ''}" onclick="setOcorFiltro('status','aberta')">Abertas</button>
+        <button class="${ft.status === 'respondida' ? 'on' : ''}" onclick="setOcorFiltro('status','respondida')">Respondidas</button>
+      </div>
+      <select class="inp" style="width:auto" onchange="setOcorFiltro('func',this.value)">
+        <option value="todos" ${ft.func === 'todos' ? 'selected' : ''}>Todos os funcionários</option>
+        ${funcs.map(f => `<option value="${f.id}" ${ft.func === f.id ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}
+      </select>
+      <span class="mut" style="font-size:12.5px;align-self:center">${lista.length} ocorrência(s)</span>
+    </div>
     <div class="card">
-      ${ocs.length ? `<table class="tbl"><thead><tr><th>Data</th><th>Funcionário</th><th>Problema</th><th>Status</th><th></th></tr></thead><tbody>
-        ${ocs.map(o => { const f = funcs.find(x => x.id === o.funcId);
+      ${lista.length ? `<table class="tbl"><thead><tr><th>Data</th><th>Funcionário</th><th>Problema</th><th>Status</th><th></th></tr></thead><tbody>
+        ${lista.map(o => { const f = funcs.find(x => x.id === o.funcId);
           const probl = (o.problemas && o.problemas.length) ? o.problemas.join(' · ') : (o.motivo || o.tipo || '—');
           return `<tr>
             <td class="mono">${o.data ? o.data.split('-').reverse().join('/') : '—'}</td>
@@ -700,9 +717,10 @@ async function renderOcor() {
               <button class="btn sm" onclick="printOcor('${o.id}')"><i class="ti ti-printer"></i></button>
               <button class="btn sm dgr" onclick="delOcor('${o.id}')"><i class="ti ti-trash"></i></button>
             </td></tr>`; }).join('')}
-      </tbody></table>` : `<div class="empty"><i class="ti ti-checks"></i>Nenhuma ocorrência. Quando um ponto ficar fora do previsto, ela aparece aqui sozinha.</div>`}
+      </tbody></table>` : `<div class="empty"><i class="ti ti-checks"></i>${ocs.length ? 'Nenhuma ocorrência com esse filtro.' : 'Nenhuma ocorrência. Quando um ponto ficar fora do previsto, ela aparece aqui sozinha.'}</div>`}
     </div>`;
 }
+function setOcorFiltro(key, val) { State.ocorFiltro[key] = val; renderOcor(); }
 async function responderOcor(id) {
   const ocs = await getOcor(State.loja.id);
   const o = ocs.find(x => x.id === id); if (!o) return;
