@@ -618,30 +618,110 @@ async function delFunc(id) {
 /* ============================================================
    TAB: OCORRÊNCIAS
 ============================================================ */
+/* varre o mês e abre uma ocorrência para cada dia com problema (sem duplicar) */
+async function scanOcorrencias() {
+  const mk = monthKey(new Date());
+  const funcs = await getFuncs(State.loja.id);
+  const escMes = await getEsc(State.loja.id, mk);
+  const regs = await getRegs(State.loja.id, mk);
+  let ocs = await getOcor(State.loja.id);
+  const today = todayStr();
+  const [Y, M] = mk.split('-').map(Number);
+  const days = new Date(Y, M, 0).getDate();
+  const temOcor = new Set(ocs.filter(o => o.data).map(o => o.funcId + '|' + o.data));
+  let changed = false;
+  for (const f of funcs) {
+    const ativoNoMes = regs.some(r => r.funcId === f.id && r.data.slice(0, 7) === mk);
+    if (!ativoNoMes) continue;
+    for (let d = 1; d <= days; d++) {
+      const dateStr = `${mk}-${String(d).padStart(2, '0')}`;
+      if (dateStr > today) break;
+      const temSaida = regs.some(r => r.funcId === f.id && r.data === dateStr && r.tipo === 'saida');
+      const avaliavel = dateStr < today || temSaida;
+      if (!avaliavel) continue;
+      const c = computeDia(f, escMes, regs, dateStr);
+      const problema = c.status === 'falta' || (c.status === 'problema' && c.issues.length);
+      if (!problema) continue;
+      const key = f.id + '|' + dateStr;
+      if (temOcor.has(key)) continue;
+      ocs.push({ id: 'o' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+        funcId: f.id, data: dateStr, auto: true, status: 'aberta',
+        tipo: c.issues[0] || 'Pendência de ponto', problemas: c.issues, criadoEm: Date.now() });
+      temOcor.add(key); changed = true;
+    }
+  }
+  if (changed) await setOcor(State.loja.id, ocs);
+  return ocs;
+}
+function badgeStatus(s) {
+  return s === 'respondida'
+    ? '<span class="badge bd-gr"><i class="ti ti-check"></i> Respondida</span>'
+    : '<span class="badge bd-rd"><i class="ti ti-alert-triangle"></i> Aberta</span>';
+}
 async function renderOcor() {
   const funcs = await getFuncs(State.loja.id);
-  const ocs = (await getOcor(State.loja.id)).sort((a, b) => b.criadoEm - a.criadoEm);
+  let ocs;
+  try { ocs = await scanOcorrencias(); } catch (e) { ocs = await getOcor(State.loja.id); }
+  ocs = ocs.slice().sort((a, b) => (a.status === 'aberta' ? 0 : 1) - (b.status === 'aberta' ? 0 : 1) || (b.criadoEm || 0) - (a.criadoEm || 0));
+  const abertas = ocs.filter(o => o.status !== 'respondida').length;
   document.getElementById('page').innerHTML = `
-    <div class="ph"><div><h2>Ocorrências de ponto</h2><p>Registre e gere o formulário para situações fora do previsto (atrasos, ajustes, abonos…).</p></div>
+    <div class="ph"><div><h2>Ocorrências de ponto</h2><p>${abertas ? `<b style="color:var(--rd)">${abertas} aberta(s)</b> aguardando justificativa.` : 'Tudo justificado.'}</p></div>
       <div class="row"><button class="btn p" onclick="novaOcor()" ${funcs.length ? '' : 'disabled'}><i class="ti ti-file-plus"></i> Nova ocorrência</button></div></div>
     <div class="card">
-      ${ocs.length ? `<table class="tbl"><thead><tr><th>Data</th><th>Funcionário</th><th>Tipo</th><th>Horário</th><th>Motivo</th><th></th></tr></thead><tbody>
-        ${ocs.map(o => { const f = funcs.find(x => x.id === o.funcId); return `<tr>
-          <td class="mono">${o.data.split('-').reverse().join('/')}</td>
-          <td><b>${f ? esc(f.nome) : '—'}</b></td>
-          <td>${badgeOcor(o.tipo)}</td>
-          <td class="mono mut">${o.de ? `${o.de}${o.ate ? '–' + o.ate : ''}` : '—'}</td>
-          <td class="mut" style="max-width:240px">${esc(o.motivo || '—')}</td>
-          <td style="text-align:right;white-space:nowrap">
-            <button class="btn sm" onclick="printOcor('${o.id}')"><i class="ti ti-printer"></i> Formulário</button>
-            <button class="btn sm dgr" onclick="delOcor('${o.id}')"><i class="ti ti-trash"></i></button></td>
-        </tr>`; }).join('')}
-      </tbody></table>` : `<div class="empty"><i class="ti ti-file-description"></i>Nenhuma ocorrência registrada.</div>`}
+      ${ocs.length ? `<table class="tbl"><thead><tr><th>Data</th><th>Funcionário</th><th>Problema</th><th>Status</th><th></th></tr></thead><tbody>
+        ${ocs.map(o => { const f = funcs.find(x => x.id === o.funcId);
+          const probl = (o.problemas && o.problemas.length) ? o.problemas.join(' · ') : (o.motivo || o.tipo || '—');
+          return `<tr>
+            <td class="mono">${o.data ? o.data.split('-').reverse().join('/') : '—'}</td>
+            <td><b>${f ? esc(f.nome) : '—'}</b></td>
+            <td class="mut" style="max-width:300px">${esc(probl)}${o.anexo ? ` <i class="ti ti-paperclip" title="${esc(o.anexo.nome)}" style="color:var(--bl)"></i>` : ''}</td>
+            <td>${badgeStatus(o.status)}</td>
+            <td style="text-align:right;white-space:nowrap">
+              ${o.status === 'respondida'
+                ? `<button class="btn sm" onclick="responderOcor('${o.id}')"><i class="ti ti-eye"></i> Ver</button>`
+                : `<button class="btn sm p" onclick="responderOcor('${o.id}')"><i class="ti ti-message-2-check"></i> Justificar</button>`}
+              <button class="btn sm" onclick="printOcor('${o.id}')"><i class="ti ti-printer"></i></button>
+              <button class="btn sm dgr" onclick="delOcor('${o.id}')"><i class="ti ti-trash"></i></button>
+            </td></tr>`; }).join('')}
+      </tbody></table>` : `<div class="empty"><i class="ti ti-checks"></i>Nenhuma ocorrência. Quando um ponto ficar fora do previsto, ela aparece aqui sozinha.</div>`}
     </div>`;
 }
-function badgeOcor(t) {
-  const c = { 'Falta': 'bd-rd', 'Atraso': 'bd-am', 'Hora extra': 'bd-bl', 'Atestado': 'bd-gr' }[t] || 'bd-gy';
-  return `<span class="badge ${c}">${t}</span>`;
+async function responderOcor(id) {
+  const ocs = await getOcor(State.loja.id);
+  const o = ocs.find(x => x.id === id); if (!o) return;
+  const funcs = await getFuncs(State.loja.id);
+  const f = funcs.find(x => x.id === o.funcId);
+  const probl = (o.problemas && o.problemas.length) ? o.problemas.join(' · ') : (o.motivo || o.tipo || '—');
+  openModal(o.status === 'respondida' ? 'Ocorrência respondida' : 'Justificar ocorrência', `
+    <div class="grid" style="gap:8px">
+      <div class="row" style="justify-content:space-between"><b>${esc(f ? f.nome : '—')}</b><span class="mono mut">${o.data ? o.data.split('-').reverse().join('/') : ''}</span></div>
+      <div class="aviso-box" style="background:var(--am-soft);border-color:#f0dcb0;color:#7a4f00;font-size:13px">${esc(probl)}</div>
+    </div>
+    <div><label class="fl">Tipo de justificativa</label><select id="r-tipo" class="inp">${OCOR_TIPOS.map(t => `<option ${o.tipoJustif === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    <div><label class="fl">Justificativa</label><textarea id="r-just" class="inp" rows="3" placeholder="Ex.: apresentou atestado médico de 1 dia.">${esc(o.justificativa || '')}</textarea></div>
+    <div><label class="fl">Anexar documento (atestado, foto ou PDF — opcional)</label><input id="r-file" class="inp" type="file" accept="image/*,application/pdf"></div>
+    ${o.anexo ? `<div class="mut" style="font-size:12.5px"><i class="ti ti-paperclip" style="vertical-align:-2px"></i> Anexo: <a href="/api/anexo/${o.anexo.arquivo}?t=${encodeURIComponent(SESS.token)}" target="_blank" style="color:var(--bl)">${esc(o.anexo.nome)}</a></div>` : ''}`,
+    [{ lbl: 'Fechar', cls: '', fn: 'closeModal()' },
+     { lbl: o.status === 'respondida' ? 'Atualizar' : 'Marcar como respondida', cls: 'g', fn: `salvarResposta('${id}')` }]);
+}
+async function salvarResposta(id) {
+  const just = document.getElementById('r-just').value.trim();
+  const tipoJ = document.getElementById('r-tipo').value;
+  const fileInput = document.getElementById('r-file');
+  if (!just) { toast('Escreva a justificativa', 'warn'); return; }
+  try {
+    let anexo = null;
+    if (fileInput && fileInput.files && fileInput.files[0]) {
+      const fd = new FormData(); fd.append('ocorId', id); fd.append('arquivo', fileInput.files[0]);
+      const up = await fetch('/api/ocor/anexo', { method: 'POST', headers: { 'x-token': SESS.token }, body: fd }).then(x => x.json());
+      if (up.ok) anexo = up.anexo; else throw new Error(up.error || 'falha no anexo');
+    }
+    const ocs = await getOcor(State.loja.id);
+    const o = ocs.find(x => x.id === id);
+    if (o) { o.justificativa = just; o.tipoJustif = tipoJ; if (anexo) o.anexo = anexo; o.status = 'respondida'; o.respondidoEm = Date.now(); }
+    await setOcor(State.loja.id, ocs);
+    closeModal(); renderOcor(); toast('Ocorrência respondida', 'ok');
+  } catch (e) { toast('Erro ao responder: ' + e.message, 'err'); }
 }
 async function novaOcor() {
   const funcs = await getFuncs(State.loja.id);
@@ -651,19 +731,15 @@ async function novaOcor() {
       <div style="flex:1"><label class="fl">Data</label><input id="o-data" class="inp" type="date" value="${todayStr()}"></div>
       <div style="flex:1"><label class="fl">Tipo</label><select id="o-tipo" class="inp">${OCOR_TIPOS.map(t => `<option>${t}</option>`).join('')}</select></div>
     </div>
-    <div class="row" style="gap:12px">
-      <div style="flex:1"><label class="fl">De (opcional)</label><input id="o-de" class="inp" type="time"></div>
-      <div style="flex:1"><label class="fl">Até (opcional)</label><input id="o-ate" class="inp" type="time"></div>
-    </div>
-    <div><label class="fl">Motivo</label><input id="o-motivo" class="inp" placeholder="Ex.: trânsito, troca de turno combinada…"></div>
+    <div><label class="fl">Motivo</label><input id="o-motivo" class="inp" placeholder="Ex.: troca de turno combinada, abono…"></div>
     <div><label class="fl">Observações</label><textarea id="o-obs" class="inp" rows="2" placeholder="Detalhes adicionais"></textarea></div>`,
     [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar ocorrência', cls: 'p', fn: 'saveOcor()' }]);
 }
 async function saveOcor() {
   const o = { id: 'o' + Date.now().toString(36), funcId: document.getElementById('o-func').value,
     data: document.getElementById('o-data').value, tipo: document.getElementById('o-tipo').value,
-    de: document.getElementById('o-de').value, ate: document.getElementById('o-ate').value,
-    motivo: document.getElementById('o-motivo').value.trim(), obs: document.getElementById('o-obs').value.trim(), criadoEm: Date.now() };
+    motivo: document.getElementById('o-motivo').value.trim(), obs: document.getElementById('o-obs').value.trim(),
+    auto: false, status: 'aberta', criadoEm: Date.now() };
   const ocs = await getOcor(State.loja.id); ocs.push(o); await setOcor(State.loja.id, ocs);
   closeModal(); renderOcor(); toast('Ocorrência registrada', 'ok');
 }
@@ -676,19 +752,21 @@ async function printOcor(id) {
   const funcs = await getFuncs(State.loja.id);
   const o = (await getOcor(State.loja.id)).find(x => x.id === id);
   const f = funcs.find(x => x.id === o.funcId);
+  const probl = (o.problemas && o.problemas.length) ? o.problemas.join(' · ') : (o.motivo || o.tipo || '—');
   const w = window.open('', '_blank');
   w.document.write(`<html><head><title>Ocorrência de Ponto</title><meta charset="utf-8">
   <style>body{font-family:Arial,sans-serif;color:#0F1C2E;max-width:720px;margin:30px auto;padding:0 24px}
   h1{font-size:18px;border-bottom:2px solid #2B59D6;padding-bottom:10px}.r{display:flex;gap:24px;margin:10px 0}
   .fld{flex:1}.fld span{display:block;font-size:11px;color:#7A8AA0;text-transform:uppercase;letter-spacing:.05em}
-  .fld b{font-size:15px}.box{border:1px solid #E6EAF1;border-radius:8px;padding:12px;margin-top:6px;min-height:50px}
-  .sign{display:flex;gap:40px;margin-top:60px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px;font-size:12px}</style></head><body>
+  .fld b{font-size:15px}.box{border:1px solid #E6EAF1;border-radius:8px;padding:12px;margin-top:6px;min-height:46px}
+  .st{font-weight:bold}.sign{display:flex;gap:40px;margin-top:60px}.sign div{flex:1;text-align:center;border-top:1px solid #333;padding-top:6px;font-size:12px}</style></head><body>
   <h1>Formulário de Ocorrência de Ponto</h1>
-  <div class="r"><div class="fld"><span>Loja</span><b>${esc(State.loja.nome)}</b></div><div class="fld"><span>Data</span><b>${o.data.split('-').reverse().join('/')}</b></div></div>
+  <div class="r"><div class="fld"><span>Loja</span><b>${esc(State.loja.nome)}</b></div><div class="fld"><span>Data</span><b>${o.data ? o.data.split('-').reverse().join('/') : '—'}</b></div></div>
   <div class="r"><div class="fld"><span>Funcionário</span><b>${esc(f ? f.nome : '—')}</b></div><div class="fld"><span>Cargo</span><b>${esc(f && f.cargo || '—')}</b></div></div>
-  <div class="r"><div class="fld"><span>Tipo</span><b>${o.tipo}</b></div><div class="fld"><span>Horário</span><b>${o.de ? o.de + (o.ate ? ' às ' + o.ate : '') : '—'}</b></div></div>
-  <div><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Motivo</span><div class="box">${esc(o.motivo || '')}</div></div>
-  <div style="margin-top:14px"><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Observações</span><div class="box">${esc(o.obs || '')}</div></div>
+  <div class="r"><div class="fld"><span>Situação</span><b>${esc(o.tipo || '—')}</b></div><div class="fld"><span>Status</span><b class="st">${o.status === 'respondida' ? 'Respondida' : 'Aberta'}</b></div></div>
+  <div><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Problema apontado</span><div class="box">${esc(probl)}</div></div>
+  <div style="margin-top:14px"><span style="font-size:11px;color:#7A8AA0;text-transform:uppercase">Justificativa${o.tipoJustif ? ' (' + esc(o.tipoJustif) + ')' : ''}</span><div class="box">${esc(o.justificativa || '')}</div></div>
+  ${o.anexo ? `<p style="font-size:12px;margin-top:8px">Documento anexado: ${esc(o.anexo.nome)}</p>` : ''}
   <div class="sign"><div>Assinatura do funcionário</div><div>Assinatura do gerente</div></div>
   <p style="text-align:center;color:#7A8AA0;font-size:11px;margin-top:40px">Grupo Shalom · gerado em ${new Date().toLocaleString('pt-BR')}</p>
   <script>window.onload=function(){window.print()}<\/script></body></html>`);

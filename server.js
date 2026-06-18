@@ -29,6 +29,8 @@ function pickDataDir() {
 }
 const DATA_DIR = pickDataDir();
 const FOTOS_DIR = path.join(DATA_DIR, 'fotos');
+const ANEXOS_DIR = path.join(DATA_DIR, 'anexos');
+fs.mkdirSync(ANEXOS_DIR, { recursive: true });
 fs.mkdirSync(FOTOS_DIR, { recursive: true });
 console.log('[ponto] DATA_DIR =', DATA_DIR);
 
@@ -228,20 +230,10 @@ app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
     } catch (e) { console.error('foto', e.message); }
   }
   const regs = getKV(`reg:${lojaId}:${mk}`) || [];
-  const tinhaEntrada = regs.some(r => r.funcId === funcId && r.data === data && r.tipo === 'entrada');
   const reg = { id: regId, funcId, tipo: prep.tipo, data, hora, ts, foto };
   regs.push(reg);
   setKV(`reg:${lojaId}:${mk}`, regs);
-
-  // saída sem entrada registrada no dia -> gera ocorrência automática
-  let ocorrencia = false;
-  if (prep.tipo === 'saida' && !tinhaEntrada) {
-    addOcor(lojaId, { id: 'o' + ts, funcId, data, tipo: 'Esquecimento de ponto',
-      de: '', ate: hora, motivo: 'Saída registrada sem entrada no dia',
-      obs: 'Ocorrência gerada automaticamente pelo sistema.', criadoEm: ts });
-    ocorrencia = true;
-  }
-  res.json({ ok: true, reg, ocorrencia });
+  res.json({ ok: true, reg });
  } catch (e) { console.error('punch', e); res.status(500).json({ error: String(e && e.message || e) }); }
 });
 
@@ -249,6 +241,25 @@ app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
 app.get('/api/foto/:loja/:reg', auth, (req, res) => {
   if (req.sess.role !== 'master' && req.sess.lojaId !== req.params.loja) return res.sendStatus(403);
   const fp = path.join(FOTOS_DIR, `${req.params.loja}_${req.params.reg}.jpg`);
+  if (!fs.existsSync(fp)) return res.sendStatus(404);
+  res.sendFile(fp);
+});
+
+/* anexo de ocorrência (atestado etc.) — gerente/master */
+app.post('/api/ocor/anexo', auth, upload.single('arquivo'), (req, res) => {
+  try {
+    if (req.sess.role === 'funcionario') return res.status(403).json({ error: 'sem_permissao' });
+    if (!req.file) return res.status(400).json({ error: 'sem_arquivo' });
+    const ext = (path.extname(req.file.originalname) || '').toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 8);
+    const arquivo = `${req.sess.lojaId}_${(req.body.ocorId || 'x').replace(/[^\w]/g, '')}_${Date.now()}${ext}`;
+    fs.writeFileSync(path.join(ANEXOS_DIR, arquivo), req.file.buffer);
+    res.json({ ok: true, anexo: { nome: req.file.originalname, arquivo } });
+  } catch (e) { console.error('anexo', e); res.status(500).json({ error: String(e && e.message || e) }); }
+});
+app.get('/api/anexo/:file', auth, (req, res) => {
+  const file = path.basename(req.params.file);
+  if (req.sess.role !== 'master' && !file.startsWith(req.sess.lojaId + '_')) return res.sendStatus(403);
+  const fp = path.join(ANEXOS_DIR, file);
   if (!fs.existsSync(fp)) return res.sendStatus(404);
   res.sendFile(fp);
 });
