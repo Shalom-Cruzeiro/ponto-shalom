@@ -191,22 +191,31 @@ function proximoTipo(funcId, ds) {
   for (const t of TIPOS) if (!done.includes(t.k)) return t.k;
   return null;
 }
+const STEP_SHORT = { entrada: 'Entrada', pausa: 'Pausa', volta: 'Retorno', saida: 'Saída' };
 function renderPunchGrid() {
   const ds = todayStr();
   const g = document.getElementById('pk-grid');
   if (!PUNCH.funcs.length) { g.innerHTML = `<div class="empty" style="grid-column:1/-1"><i class="ti ti-users"></i>Nenhum funcionário cadastrado nesta loja.</div>`; return; }
   g.innerHTML = PUNCH.funcs.map(f => {
+    const done = regsDoDia(f.id, ds).map(r => r.tipo);
     const nx = proximoTipo(f.id, ds);
     const plano = planoDia(f, PUNCH.escMes, ds);
-    const sub = nx ? ('Próximo: ' + TIPO_LBL[nx]) : 'Dia concluído';
-    const ic = nx ? (TIPOS.find(t => t.k === nx).ic) : 'ti-circle-check';
     const turno = plano.on ? `${plano.ini}–${plano.fim}` : 'Folga';
-    return `<button class="emp" ${nx ? '' : 'disabled style=opacity:.55'} onclick="startCapture('${f.id}')">
-      <div class="row" style="gap:9px">
-        <div class="ava" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
-        <div style="min-width:0"><div class="nm">${esc(f.nome)}</div><div class="nx mono">${turno}</div></div>
+    const steps = TIPOS.map(t => {
+      const cls = done.includes(t.k) ? 'done' : (t.k === nx ? 'next' : 'todo');
+      const ic = done.includes(t.k) ? 'ti-check' : t.ic;
+      return `<div class="step ${cls}"><i class="ti ${ic}"></i><span>${STEP_SHORT[t.k]}</span></div>`;
+    }).join('');
+    const cta = nx
+      ? `<div class="emp-cta"><i class="ti ${TIPOS.find(t => t.k === nx).ic}"></i> Registrar ${STEP_SHORT[nx]}</div>`
+      : `<div class="emp-cta ok"><i class="ti ti-circle-check"></i> Dia concluído</div>`;
+    return `<button class="emp ${nx ? '' : 'concluido'}" ${nx ? '' : 'disabled'} onclick="startCapture('${f.id}')">
+      <div class="emp-head">
+        <div class="ava lg" style="background:${avColor(f.nome)}">${initials(f.nome)}</div>
+        <div style="min-width:0"><div class="nm">${esc(f.nome)}</div><div class="turno mono">${turno}</div></div>
       </div>
-      <div class="nx"><i class="ti ${ic}" style="vertical-align:-2px"></i> ${sub}</div>
+      <div class="steps">${steps}</div>
+      ${cta}
     </button>`;
   }).join('');
 }

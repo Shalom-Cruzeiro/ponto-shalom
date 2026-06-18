@@ -55,10 +55,19 @@ const cfg = () => getKV('cfg');
 /* ---- helpers de tempo (sempre America/Sao_Paulo) ---- */
 function nowSP() {
   const d = new Date();
-  const data = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-  const hora = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
-  const [H, M] = hora.split(':').map(Number);
-  return { data, hora, ts: d.getTime(), min: H * 60 + M };
+  try {
+    const data = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const hora = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    const [H, M] = hora.split(':').map(Number);
+    if (Number.isNaN(H)) throw new Error('tz');
+    return { data, hora, ts: d.getTime(), min: H * 60 + M };
+  } catch (e) {
+    // Plano B: horário do Brasil fixo em UTC-3 (sem horário de verão desde 2019)
+    const b = new Date(d.getTime() - 3 * 3600 * 1000);
+    const data = `${b.getUTCFullYear()}-${String(b.getUTCMonth() + 1).padStart(2, '0')}-${String(b.getUTCDate()).padStart(2, '0')}`;
+    const H = b.getUTCHours(), M = b.getUTCMinutes();
+    return { data, hora: `${String(H).padStart(2, '0')}:${String(M).padStart(2, '0')}`, ts: d.getTime(), min: H * 60 + M };
+  }
 }
 const toMin = (t) => { if (!t) return 0; const [a, b] = t.split(':').map(Number); return a * 60 + b; };
 function dur(p) { if (!p || !p.on || !p.ini || !p.fim) return 0; let d = toMin(p.fim) - toMin(p.ini); if (d < 0) d += 1440; return Math.max(0, d - (p.interv || 0)); }
@@ -172,11 +181,13 @@ function prepararPonto(lojaId, funcId) {
   return { tipo, plano, nome: f.nome, data };
 }
 app.post('/api/punch/prepare', auth, (req, res) => {
-  res.json(prepararPonto(req.sess.lojaId, req.body.funcId));
+  try { res.json(prepararPonto(req.sess.lojaId, req.body.funcId)); }
+  catch (e) { console.error('prepare', e); res.status(500).json({ error: String(e && e.message || e) }); }
 });
 
 /* registrar ponto (com foto) */
 app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
+ try {
   const lojaId = req.sess.lojaId;
   const funcId = req.body.funcId;
   const prep = prepararPonto(lojaId, funcId);
@@ -200,6 +211,7 @@ app.post('/api/punch', auth, upload.single('foto'), async (req, res) => {
   regs.push(reg);
   setKV(`reg:${lojaId}:${mk}`, regs);
   res.json({ ok: true, reg });
+ } catch (e) { console.error('punch', e); res.status(500).json({ error: String(e && e.message || e) }); }
 });
 
 /* servir foto */
@@ -226,6 +238,9 @@ function limparFotos() {
 }
 setInterval(limparFotos, 24 * 3600 * 1000);
 limparFotos();
+
+/* tratador geral: nunca devolve erro sem motivo */
+app.use((err, req, res, next) => { console.error('erro', err); res.status(500).json({ error: String(err && err.message || err) }); });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n✅ Sistema de Ponto no ar — porta ${PORT} — fuso ${TZ}\n`);
