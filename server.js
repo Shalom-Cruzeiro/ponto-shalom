@@ -43,20 +43,34 @@ const getKV = (k) => { const r = db.prepare('SELECT val FROM kv WHERE key=?').ge
 const setKV = (k, v) => db.prepare('INSERT INTO kv(key,val) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET val=excluded.val').run(k, JSON.stringify(v));
 
 /* ---- config inicial (semeia 13 lojas só na primeira vez) ---- */
+const LOJA_NOMES = ["Shopping Estação", "Shopping DelRey", "Betim", "Outlet BH", "Minas",
+  "ViaShopping", "Itau", "Boulevard", "Ipatinga", "Cidade", "Valadares", "Savassi", "Itabira"];
+const LOJAS_VERSION = 2;
 function seedCfg() {
   if (getKV('cfg')) return;
-  const nomes = ["Loja do Cruzeiro - Estação","Cruzeiro - Shopping","DelRey","Outlet","Centro",
-    "Barreiro","Contagem","Betim","Savassi","Buritis","Pampulha","Venda Nova","Eldorado"];
-  const lojas = nomes.map((nome, i) => ({ id: 'L' + String(i + 1).padStart(2, '0'), nome, senha: '1234', senhaFunc: '0000' }));
-  setKV('cfg', { lojas, masterSenha: 'master2024', metaHoras: 180, tolerancia: 5, intervaloPadrao: 60 });
+  const lojas = LOJA_NOMES.map((nome, i) => ({ id: 'L' + String(i + 1).padStart(2, '0'), nome, senha: '1234', senhaFunc: '0000' }));
+  setKV('cfg', { lojas, masterSenha: 'master2024', metaHoras: 180, tolerancia: 5, intervaloPadrao: 60, lojasVersion: LOJAS_VERSION });
   console.log('[ponto] config inicial criada (gerente 1234, funcionários 0000)');
 }
 seedCfg();
 // migração: garante senha de funcionário nas lojas já existentes
-(function migrateCfg() {
+(function migrateSenhaFunc() {
   const c = getKV('cfg'); if (!c) return; let changed = false;
   c.lojas.forEach(l => { if (!l.senhaFunc) { l.senhaFunc = '0000'; changed = true; } });
-  if (changed) { setKV('cfg', c); console.log('[ponto] migração: senha de funcionário (0000) adicionada às lojas'); }
+  if (changed) { setKV('cfg', c); console.log('[ponto] migração: senha de funcionário (0000) adicionada'); }
+})();
+// migração: atualiza os nomes das lojas para a lista real (mantém ids e senhas)
+(function migrateLojaNomes() {
+  const c = getKV('cfg'); if (!c) return;
+  if (c.lojasVersion === LOJAS_VERSION) return;
+  c.lojas = LOJA_NOMES.map((nome, i) => {
+    const id = 'L' + String(i + 1).padStart(2, '0');
+    const ex = (c.lojas || []).find(l => l.id === id) || {};
+    return { id, nome, senha: ex.senha || '1234', senhaFunc: ex.senhaFunc || '0000' };
+  });
+  c.lojasVersion = LOJAS_VERSION;
+  setKV('cfg', c);
+  console.log('[ponto] nomes das lojas atualizados para a lista real (v' + LOJAS_VERSION + ')');
 })();
 const cfg = () => getKV('cfg');
 
