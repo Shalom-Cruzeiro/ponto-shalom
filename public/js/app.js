@@ -87,14 +87,19 @@ function toast(msg, kind = 'ok') {
 /* ============================================================
    STATE
 ============================================================ */
-const State = { loja: null, role: 'gerente', cfg: null, tab: 'ponto',
+const State = { loja: null, role: 'gerente', cfg: null, tab: 'ponto', escView: 'loja',
   calMonth: new Date(), calFunc: null, repMonth: new Date(), repFunc: null, repMode: 'func',
   ocorFiltro: { status: 'todas', func: 'todos' } };
 
-function planoDia(func, escMes, dateStr) {
-  if (escMes && escMes[func.id] && escMes[func.id][dateStr]) return escMes[func.id][dateStr];
-  const dow = parseYmd(dateStr).getDay();
-  return (func.padrao && func.padrao[dow]) ? func.padrao[dow] : { on: false };
+/* ajuste manual do mês > rodízio automático (func.regra) > padrão semanal */
+function planoDia(func, escMes, dateStr) { return EscalaAuto.planoDia(func, escMes, dateStr); }
+/* configuração de escala da loja: horário de funcionamento e mínimo de pessoas */
+const getEscCfg = async (lj) => (await apiGet(`/api/data/escala:${lj}:cfg`)) || {};
+const setEscCfg = async (lj, v) => { await api('PUT', `/api/data/escala:${lj}:cfg`, v); cachePut(`/api/data/escala:${lj}:cfg`, v); };
+function optsLoja(cfgEsc, dateStr) {
+  const dom = parseYmd(dateStr).getDay() === 0;
+  const h = dom ? cfgEsc.horDom : cfgEsc.horSem;
+  return { minLoja: +cfgEsc.minLoja || 1, horario: h && h.ini && h.fim ? h : null };
 }
 
 /* ============================================================
@@ -425,40 +430,254 @@ function closeCapture() {
 async function renderEscala() {
   const funcs = await getFuncs(State.loja.id);
   if (!funcs.length) { noFuncs('Cadastre funcionários para montar a escala.'); return; }
-  if (!State.calFunc || !funcs.find(f => f.id === State.calFunc)) State.calFunc = funcs[0].id;
   const mk = monthKey(State.calMonth);
-  const escMes = await getEsc(State.loja.id, mk);
-  const func = funcs.find(f => f.id === State.calFunc);
-  const total = mesPrevisto(func, escMes, State.calMonth);
-  const meta = State.cfg.metaHoras * 60;
-  const ok = total >= meta;
-
+  const [escMes, cfgEsc] = await Promise.all([getEsc(State.loja.id, mk), getEscCfg(State.loja.id)]);
+  const mesLbl = capWord(State.calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
+  const view = State.escView === 'func' ? 'func' : 'loja';
   document.getElementById('page').innerHTML = `
     <div class="ph">
-      <div><h2>Escala mensal</h2><p>Programe os turnos. Clique num dia para ajustar. As horas previstas são somadas automaticamente.</p></div>
+      <div><h2>Escala mensal</h2><p>As folgas saem do rodízio de cada funcionário e os almoços são escalonados para a loja nunca ficar vazia.</p></div>
       <div class="row">
-        <select class="inp" style="width:auto" onchange="State.calFunc=this.value;renderEscala()">
-          ${funcs.map(f => `<option value="${f.id}" ${f.id === State.calFunc ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}
-        </select>
+        <div class="seg">
+          <button class="${view === 'loja' ? 'on' : ''}" onclick="State.escView='loja';renderEscala()"><i class="ti ti-building-store"></i> Loja</button>
+          <button class="${view === 'func' ? 'on' : ''}" onclick="State.escView='func';renderEscala()"><i class="ti ti-user"></i> Por funcionário</button>
+        </div>
       </div>
     </div>
     <div class="card cpad" style="margin-bottom:14px">
       <div class="row" style="justify-content:space-between">
         <div class="row">
           <button class="btn sm" onclick="shiftMonth(-1)"><i class="ti ti-chevron-left"></i></button>
-          <div style="font-weight:700;font-size:15px;min-width:150px;text-align:center">${capWord(State.calMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }))}</div>
+          <div style="font-weight:700;font-size:15px;min-width:150px;text-align:center">${mesLbl}</div>
           <button class="btn sm" onclick="shiftMonth(1)"><i class="ti ti-chevron-right"></i></button>
         </div>
-        <div class="row">
-          <button class="btn sm" onclick="aplicarPadrao()"><i class="ti ti-wand"></i> Aplicar padrão do funcionário</button>
-          <button class="btn sm dgr" onclick="limparMes()"><i class="ti ti-eraser"></i> Limpar mês</button>
-        </div>
+        <div class="row" id="esc-actions"></div>
       </div>
     </div>
+    <div id="esc-body"></div>`;
+  if (view === 'loja') renderEscalaLoja(funcs, escMes, cfgEsc);
+  else renderEscalaFunc(funcs, escMes, cfgEsc);
+}
+function shiftMonth(n) { State.calMonth = new Date(State.calMonth.getFullYear(), State.calMonth.getMonth() + n, 1); renderEscala(); }
+function diasDoMes(monthDate) {
+  const y = monthDate.getFullYear(), m = monthDate.getMonth(), n = new Date(y, m + 1, 0).getDate();
+  return Array.from({ length: n }, (_, i) => `${y}-${String(m + 1).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`);
+}
+function mesPrevisto(func, escMes, monthDate) {
+  return diasDoMes(monthDate).reduce((t, ds) => t + dur(planoDia(func, escMes, ds)), 0);
+}
+
+/* ---------- visão da loja: todos os funcionários no mês ---------- */
+function renderEscalaLoja(funcs, escMes, cfgEsc) {
+  document.getElementById('esc-actions').innerHTML = `
+    <button class="btn sm" onclick="abrirHorarioLoja()"><i class="ti ti-clock"></i> Horário da loja</button>
+    <button class="btn sm p" onclick="abrirSugestao()"><i class="ti ti-wand"></i> Sugerir escala da loja</button>`;
+  const dias = diasDoMes(State.calMonth), hoje = todayStr();
+  const cob = {}; let diasAlerta = 0;
+  dias.forEach(ds => { cob[ds] = EscalaAuto.cobertura(funcs, escMes, ds, optsLoja(cfgEsc, ds)); if (cob[ds].faltas.length) diasAlerta++; });
+  const semRodizio = funcs.filter(f => !EscalaAuto.regraValida(f.regra));
+  const head = dias.map(ds => { const d = parseYmd(ds); const dom = d.getDay() === 0;
+    return `<th class="${dom ? 'dom' : ''} ${ds === hoje ? 'hoje' : ''}" onclick="diaLoja('${ds}')" title="Ver o dia"><div>${DOW[d.getDay()].slice(0, 1)}</div><div>${d.getDate()}</div>${dom ? `<div class="sem">${EscalaAuto.semanaLetra(ds)}</div>` : ''}</th>`; }).join('');
+  const rows = funcs.map(f => {
+    const auto = EscalaAuto.regraValida(f.regra);
+    const cells = dias.map(ds => {
+      const p = planoDia(f, escMes, ds); const dom = parseYmd(ds).getDay() === 0;
+      const man = escMes[f.id] && escMes[f.id][ds];
+      if (!p.on) return `<td class="fg ${dom ? 'dom' : ''} ${man ? 'man' : ''}" onclick="diaLoja('${ds}')">F</td>`;
+      const alm = cob[ds].almocos[f.id];
+      return `<td class="tr ${dom ? 'dom' : ''} ${man ? 'man' : ''}" onclick="diaLoja('${ds}')" title="${p.ini}–${p.fim}${alm ? ' · almoço ' + alm : ''}"><div>${p.ini.slice(0, 2)}</div>${alm ? `<div class="al">${alm}</div>` : ''}</td>`;
+    }).join('');
+    return `<tr><th class="nm"><div class="row" style="gap:7px;flex-wrap:nowrap"><div class="ava" style="background:${avColor(f.nome)};width:26px;height:26px;border-radius:7px;font-size:10.5px;flex:none">${initials(f.nome)}</div>
+      <div style="min-width:0"><div class="t1">${esc(f.nome.split(' ')[0])}</div><div class="t2">${auto ? EscalaAuto.descreverRegra(f.regra).replace(/^.*?· /, '') : 'Dias fixos'}</div></div></div></th>${cells}</tr>`;
+  }).join('');
+  const rodape = dias.map(ds => { const c = cob[ds]; const n = c.pessoas.length; const alerta = c.faltas.length;
+    return `<td class="${alerta ? 'alerta' : ''}" onclick="diaLoja('${ds}')">${n}${alerta ? '<i class="ti ti-alert-triangle"></i>' : ''}</td>`; }).join('');
+  document.getElementById('esc-body').innerHTML = `
+    ${semRodizio.length ? `<div class="card cpad" style="margin-bottom:14px;border-color:#f0dcb0;background:var(--am-soft)">
+      <i class="ti ti-info-circle"></i> ${semRodizio.map(f => esc(f.nome.split(' ')[0])).join(', ')} ainda ${semRodizio.length > 1 ? 'estão' : 'está'} sem rodízio automático.
+      Use <b>Sugerir escala da loja</b> ou edite o funcionário para gerar as folgas sozinho.</div>` : ''}
+    <div class="card cpad" style="margin-bottom:14px">
+      <div class="hsum">
+        <div><div class="lbl">Funcionários</div><div class="big mono">${funcs.length}</div></div>
+        <div><div class="lbl">Dias com loja descoberta</div><div class="big mono" style="color:${diasAlerta ? 'var(--rd)' : 'var(--gr)'}">${diasAlerta}</div></div>
+        <div style="flex:1"></div>
+        ${diasAlerta ? `<span class="badge bd-rd"><i class="ti ti-alert-triangle"></i> Há horários com menos de ${+cfgEsc.minLoja || 1} pessoa(s) na loja — clique no dia</span>`
+                     : `<span class="badge bd-gr"><i class="ti ti-circle-check"></i> Loja coberta em todos os horários, inclusive nos almoços</span>`}
+      </div>
+    </div>
+    <div class="card escg-wrap"><table class="escg">
+      <thead><tr><th class="nm">Funcionário</th>${head}</tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th class="nm">Na loja</th>${rodape}</tr></tfoot>
+    </table></div>
+    <div class="mut" style="font-size:11.5px;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">
+      <span><b>F</b> = folga</span><span>número = hora de entrada</span><span><span style="color:var(--bl-d);font-weight:700">13:00</span> = almoço</span>
+      <span>A/B = semana do rodízio de domingo</span><span><span class="lg-man"></span> ajuste manual</span><span>Clique num dia para ver a linha do tempo</span></div>`;
+}
+
+/* ---------- linha do tempo de um dia ---------- */
+async function diaLoja(ds) {
+  const funcs = await getFuncs(State.loja.id);
+  const mk = ds.slice(0, 7);
+  const [escMes, cfgEsc] = await Promise.all([getEsc(State.loja.id, mk), getEscCfg(State.loja.id)]);
+  const c = EscalaAuto.cobertura(funcs, escMes, ds, optsLoja(cfgEsc, ds));
+  const d = parseYmd(ds);
+  const titulo = capWord(d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }));
+  let corpo;
+  if (!c.pessoas.length) corpo = `<div class="empty"><i class="ti ti-calendar-off"></i>Ninguém escalado neste dia.</div>`;
+  else {
+    const a = Math.floor(Math.min(c.abre, ...c.pessoas.map(p => p.ini)) / 60) * 60;
+    const b = Math.ceil(Math.max(c.fecha, ...c.pessoas.map(p => p.fim)) / 60) * 60;
+    const pct = m => ((m - a) / (b - a) * 100).toFixed(2) + '%';
+    const horas = []; for (let h = a; h <= b; h += 60) horas.push(`<span style="left:${pct(h)}">${String((h / 60) % 24).padStart(2, '0')}h</span>`);
+    const linhas = c.pessoas.map(p => `<div class="tl-row">
+        <div class="tl-nm">${esc(p.nome.split(' ')[0])}</div>
+        <div class="tl-bar">
+          <div class="tl-shift" style="left:${pct(p.ini)};width:calc(${pct(p.fim)} - ${pct(p.ini)})"></div>
+          ${p.alm != null ? `<div class="tl-alm" style="left:${pct(p.alm)};width:calc(${pct(p.almFim)} - ${pct(p.alm)})"><i class="ti ti-tools-kitchen-2"></i></div>` : ''}
+        </div>
+        <div class="tl-alm-inp"><input class="inp" type="time" value="${p.alm != null ? fmtMin(p.alm % 1440) : ''}" ${p.alm == null ? 'disabled' : ''} data-f="${p.id}" title="Horário do almoço"></div>
+      </div>`).join('');
+    const cobBar = c.slots.map(s => `<div class="tl-cob n${Math.min(s.n, 3)}" style="left:${pct(s.t)};width:calc(${pct(s.t + 15)} - ${pct(s.t)})" title="${fmtMin(s.t % 1440)} · ${s.n} na loja"></div>`).join('');
+    corpo = `
+      <div class="tl">
+        <div class="tl-row tl-head"><div class="tl-nm"></div><div class="tl-bar tl-hours">${horas.join('')}</div><div class="tl-alm-inp mut" style="font-size:11px">Almoço</div></div>
+        ${linhas}
+        <div class="tl-row"><div class="tl-nm mut">Na loja</div><div class="tl-bar">${cobBar}</div><div class="tl-alm-inp"></div></div>
+      </div>
+      ${c.faltas.length ? c.faltas.map(f => `<div class="badge bd-rd" style="margin-top:8px"><i class="ti ti-alert-triangle"></i> ${f.ini}–${f.fim}: ${f.n === 0 ? 'loja sem ninguém' : f.n + ' pessoa(s), abaixo do mínimo'}</div>`).join(' ')
+        : `<div class="badge bd-gr" style="margin-top:8px"><i class="ti ti-circle-check"></i> Sempre tem alguém na loja, inclusive nos almoços</div>`}
+      <p class="mut" style="font-size:11.5px;margin:10px 0 0">Os almoços foram escalonados automaticamente. Para fixar outro horário neste dia, mude o campo e salve.</p>`;
+  }
+  openModal(titulo, corpo, [
+    { lbl: 'Fechar', cls: '', fn: 'closeModal()' },
+    ...(c.pessoas.length ? [{ lbl: 'Recalcular almoços', cls: '', fn: `resetAlmocos('${ds}')` }, { lbl: 'Salvar almoços', cls: 'p', fn: `salvarAlmocos('${ds}')` }] : [])]);
+  const m = document.querySelector('#modal-root .modal'); if (m) m.style.maxWidth = '760px';
+}
+async function salvarAlmocos(ds) {
+  const funcs = await getFuncs(State.loja.id);
+  const mk = ds.slice(0, 7);
+  const escMes = await getEsc(State.loja.id, mk);
+  const auto = EscalaAuto.almocos(funcs, escMes, ds);
+  let mudou = 0;
+  document.querySelectorAll('#modal-root input[data-f]').forEach(inp => {
+    const fid = inp.dataset.f, v = inp.value; if (!v || v === auto[fid]) return;
+    const f = funcs.find(x => x.id === fid); const p = planoDia(f, escMes, ds);
+    escMes[fid] = escMes[fid] || {}; escMes[fid][ds] = { on: true, ini: p.ini, fim: p.fim, interv: p.interv || 0, alm: v }; mudou++;
+  });
+  if (!mudou) { closeModal(); return; }
+  await setEsc(State.loja.id, mk, escMes);
+  closeModal(); renderEscala(); toast('Almoço ajustado', 'ok'); setTimeout(() => diaLoja(ds), 50);
+}
+async function resetAlmocos(ds) {
+  const funcs = await getFuncs(State.loja.id);
+  const mk = ds.slice(0, 7);
+  const escMes = await getEsc(State.loja.id, mk);
+  for (const f of funcs) { const e = escMes[f.id] && escMes[f.id][ds]; if (e && e.alm) delete e.alm; }
+  await setEsc(State.loja.id, mk, escMes);
+  closeModal(); renderEscala(); toast('Almoços recalculados', 'ok'); setTimeout(() => diaLoja(ds), 50);
+}
+
+/* ---------- horário de funcionamento / mínimo de pessoas ---------- */
+async function abrirHorarioLoja() {
+  const c = await getEscCfg(State.loja.id);
+  const hs = c.horSem || {}, hd = c.horDom || {};
+  openModal('Horário da loja', `
+    <p class="mut" style="margin:0;font-size:12.5px">Usado para conferir se sempre há alguém na loja. Deixe em branco para considerar do primeiro que entra ao último que sai.</p>
+    <div><label class="fl">Segunda a sábado</label><div class="row" style="gap:8px">
+      <div style="flex:1"><span class="mut" style="font-size:11px">Abre</span><input id="hl-s-ini" class="inp" type="time" value="${hs.ini || ''}"></div>
+      <div style="flex:1"><span class="mut" style="font-size:11px">Fecha</span><input id="hl-s-fim" class="inp" type="time" value="${hs.fim || ''}"></div></div></div>
+    <div><label class="fl">Domingo e feriado</label><div class="row" style="gap:8px">
+      <div style="flex:1"><span class="mut" style="font-size:11px">Abre</span><input id="hl-d-ini" class="inp" type="time" value="${hd.ini || ''}"></div>
+      <div style="flex:1"><span class="mut" style="font-size:11px">Fecha</span><input id="hl-d-fim" class="inp" type="time" value="${hd.fim || ''}"></div></div></div>
+    <div><label class="fl">Mínimo de pessoas na loja a todo momento</label>
+      <select id="hl-min" class="inp">${[1, 2, 3].map(n => `<option value="${n}" ${(+c.minLoja || 1) === n ? 'selected' : ''}>${n} pessoa${n > 1 ? 's' : ''}</option>`).join('')}</select></div>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar', cls: 'p', fn: 'salvarHorarioLoja()' }]);
+}
+async function salvarHorarioLoja() {
+  const v = id => document.getElementById(id).value;
+  await setEscCfg(State.loja.id, { horSem: { ini: v('hl-s-ini'), fim: v('hl-s-fim') }, horDom: { ini: v('hl-d-ini'), fim: v('hl-d-fim') }, minLoja: +v('hl-min') || 1 });
+  closeModal(); renderEscala(); toast('Horário da loja salvo', 'ok');
+}
+
+/* ---------- sugestão de escala para a loja inteira ---------- */
+let _sug = null;
+async function abrirSugestao() {
+  const funcs = await getFuncs(State.loja.id);
+  const ref = funcs.find(f => EscalaAuto.regraValida(f.regra));
+  _sug = { modelo: ref ? ref.regra.modelo : 'alt',
+    sem: ref ? { ...ref.regra.sem } : { ...EscalaAuto.DEF_SEM }, dom: ref ? { ...ref.regra.dom } : { ...EscalaAuto.DEF_DOM } };
+  openModal('Sugerir escala da loja', `
+    <p class="mut" style="margin:0;font-size:12.5px">O sistema espalha as folgas fixas pela semana (evitando o sábado) e divide os domingos em dois grupos, para a loja nunca ficar sem gente. Você pode ajustar cada pessoa depois em Funcionários.</p>
+    <div><label class="fl">Modelo</label><select id="sg-modelo" class="inp" onchange="sugPreview()">
+      ${Object.entries(EscalaAuto.MODELOS).map(([k, v]) => `<option value="${k}" ${_sug.modelo === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+    <div class="row" style="gap:8px">
+      <div style="flex:1"><label class="fl">Seg a sáb</label><div class="row" style="gap:6px">
+        <input id="sg-s-ini" class="inp" type="time" value="${_sug.sem.ini}" onchange="sugPreview()"><input id="sg-s-fim" class="inp" type="time" value="${_sug.sem.fim}" onchange="sugPreview()">
+        <input id="sg-s-int" class="inp" type="number" style="width:70px" min="0" step="5" value="${_sug.sem.interv}" onchange="sugPreview()" title="Almoço (min)"></div></div>
+    </div>
+    <div class="row" style="gap:8px">
+      <div style="flex:1"><label class="fl">Domingo</label><div class="row" style="gap:6px">
+        <input id="sg-d-ini" class="inp" type="time" value="${_sug.dom.ini}" onchange="sugPreview()"><input id="sg-d-fim" class="inp" type="time" value="${_sug.dom.fim}" onchange="sugPreview()">
+        <input id="sg-d-int" class="inp" type="number" style="width:70px" min="0" step="5" value="${_sug.dom.interv}" onchange="sugPreview()" title="Intervalo (min)"></div></div>
+    </div>
+    <div id="sg-prev"></div>`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Aplicar a todos', cls: 'p', fn: 'aplicarSugestao()' }]);
+  const m = document.querySelector('#modal-root .modal'); if (m) m.style.maxWidth = '640px';
+  sugPreview();
+}
+async function sugPreview() {
+  const v = id => document.getElementById(id).value;
+  _sug.modelo = v('sg-modelo');
+  _sug.sem = { ini: v('sg-s-ini'), fim: v('sg-s-fim'), interv: +v('sg-s-int') || 0 };
+  _sug.dom = { ini: v('sg-d-ini'), fim: v('sg-d-fim'), interv: +v('sg-d-int') || 0 };
+  const funcs = await getFuncs(State.loja.id);
+  _sug.regras = EscalaAuto.sugerirLoja(funcs, _sug.modelo, { sem: _sug.sem, dom: _sug.dom });
+  const sim = funcs.map(f => ({ ...f, regra: _sug.regras[f.id] }));
+  const seg = parseYmd(todayStr()); seg.setDate(seg.getDate() - ((seg.getDay() + 6) % 7));
+  const semanas = [0, 7].map(off => Array.from({ length: 7 }, (_, i) => { const d = new Date(seg); d.setDate(seg.getDate() + off + i); return ymd(d); }));
+  const tab = semanas.map(sem => `<tr><th class="mut" style="font-size:11px">Sem. ${EscalaAuto.semanaLetra(sem[0])}</th>${sem.map(ds => {
+    const c = EscalaAuto.cobertura(sim, {}, ds); const n = c.pessoas.length;
+    return `<td class="${c.faltas.length ? 'alerta' : ''}">${n}</td>`; }).join('')}</tr>`).join('');
+  document.getElementById('sg-prev').innerHTML = `
+    <table class="tbl" style="margin-top:4px"><thead><tr><th>Funcionário</th><th>Folga fixa</th><th>Domingo</th>${_sug.modelo === '5x2' ? '<th>2ª folga</th>' : ''}</tr></thead><tbody>
+    ${funcs.map(f => { const r = _sug.regras[f.id]; return `<tr><td><b>${esc(f.nome)}</b></td><td>${EscalaAuto.DOW_NOME[r.folgaFixa]}</td><td>Grupo ${r.grupoDom}</td>${_sug.modelo === '5x2' ? `<td>${EscalaAuto.DOW_NOME[r.folga2]}</td>` : ''}</tr>`; }).join('')}
+    </tbody></table>
+    <div class="fl" style="margin-top:12px">Pessoas na loja por dia</div>
+    <table class="escg mini"><thead><tr><th></th>${['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>${tab}</tbody></table>`;
+}
+async function aplicarSugestao() {
+  if (!_sug || !_sug.regras) return;
+  if (!confirm('Aplicar o rodízio sugerido a todos os funcionários desta loja? Os ajustes manuais de dias específicos continuam valendo.')) return;
+  const funcs = await getFuncs(State.loja.id);
+  funcs.forEach(f => { const r = _sug.regras[f.id]; if (!r) return; if (r.modelo !== '5x2') delete r.folga2; f.regra = r; });
+  await setFuncs(State.loja.id, funcs);
+  closeModal(); State.escView = 'loja'; renderEscala(); toast('Escala da loja gerada', 'ok');
+}
+
+/* ---------- visão por funcionário (calendário) ---------- */
+function renderEscalaFunc(funcs, escMes, cfgEsc) {
+  if (!State.calFunc || !funcs.find(f => f.id === State.calFunc)) State.calFunc = funcs[0].id;
+  const func = funcs.find(f => f.id === State.calFunc);
+  const auto = EscalaAuto.regraValida(func.regra);
+  const total = mesPrevisto(func, escMes, State.calMonth);
+  const meta = State.cfg.metaHoras * 60;
+  const ok = total >= meta;
+  const ajustes = Object.keys(escMes[func.id] || {}).length;
+  document.getElementById('esc-actions').innerHTML = `
+    <select class="inp" style="width:auto" onchange="State.calFunc=this.value;renderEscala()">
+      ${funcs.map(f => `<option value="${f.id}" ${f.id === State.calFunc ? 'selected' : ''}>${escapeOpt(f.nome)}</option>`).join('')}
+    </select>
+    <button class="btn sm" onclick="novoFunc('${func.id}')"><i class="ti ti-refresh"></i> Rodízio</button>
+    ${auto ? '' : `<button class="btn sm" onclick="aplicarPadrao()"><i class="ti ti-wand"></i> Aplicar padrão</button>`}
+    ${ajustes ? `<button class="btn sm dgr" onclick="limparMes()"><i class="ti ti-eraser"></i> Desfazer ajustes do mês</button>` : ''}`;
+  document.getElementById('esc-body').innerHTML = `
     <div class="card cpad" style="margin-bottom:14px">
       <div class="hsum">
         <div><div class="lbl">Horas previstas no mês</div><div class="big mono" style="color:${ok ? 'var(--gr)' : 'var(--am)'}">${fmtH(total)}</div></div>
+        <div><div class="lbl">Folgas no mês</div><div class="big mono">${diasDoMes(State.calMonth).filter(ds => !planoDia(func, escMes, ds).on).length}</div></div>
         <div style="flex:1"></div>
+        ${auto ? `<span class="badge bd-bl"><i class="ti ti-refresh"></i> ${EscalaAuto.descreverRegra(func.regra)}</span>` : `<span class="badge bd-gy">Dias fixos</span>`}
         ${ok ? `<span class="badge bd-gr"><i class="ti ti-circle-check"></i> Meta de ${State.cfg.metaHoras}h atingida</span>`
              : `<span class="badge bd-am"><i class="ti ti-alert-triangle"></i> Abaixo de ${State.cfg.metaHoras}h — faltam ${fmtH(meta - total)}</span>`}
       </div>
@@ -466,27 +685,22 @@ async function renderEscala() {
     <div class="card cpad">
       <div class="cal" style="margin-bottom:6px">${DOW.map(d => `<div class="dow">${d}</div>`).join('')}</div>
       <div class="cal" id="cal-grid"></div>
+      <p class="mut" style="font-size:11.5px;margin:10px 0 0">Clique num dia para trocar uma folga ou mudar o horário só daquele dia (fica marcado como ajuste).</p>
     </div>`;
-  drawCalendar(func, escMes);
+  drawCalendar(func, escMes, funcs, cfgEsc);
 }
-function shiftMonth(n) { State.calMonth = new Date(State.calMonth.getFullYear(), State.calMonth.getMonth() + n, 1); renderEscala(); }
-function mesPrevisto(func, escMes, monthDate) {
-  const y = monthDate.getFullYear(), m = monthDate.getMonth(), days = new Date(y, m + 1, 0).getDate();
-  let total = 0;
-  for (let d = 1; d <= days; d++) total += dur(planoDia(func, escMes, `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`));
-  return total;
-}
-function drawCalendar(func, escMes) {
+function drawCalendar(func, escMes, funcs, cfgEsc) {
   const y = State.calMonth.getFullYear(), m = State.calMonth.getMonth();
-  const first = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate(), ds = todayStr();
+  const first = new Date(y, m, 1).getDay(), ds = todayStr();
   let html = '';
   for (let i = 0; i < first; i++) html += '<div class="cell empty"></div>';
-  for (let d = 1; d <= days; d++) {
-    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  for (const dateStr of diasDoMes(State.calMonth)) {
     const p = planoDia(func, escMes, dateStr);
-    html += `<div class="cell ${!p.on ? 'off' : ''} ${dateStr === ds ? 'today' : ''}" onclick="editDia('${dateStr}')">
-      <div class="dn">${d}</div>
-      ${p.on ? `<div class="sh">${p.ini}<br>${p.fim}</div>` : `<div class="fg">Folga</div>`}</div>`;
+    const man = escMes[func.id] && escMes[func.id][dateStr];
+    const alm = p.on && funcs ? EscalaAuto.almocos(funcs, escMes, dateStr, optsLoja(cfgEsc || {}, dateStr))[func.id] : null;
+    html += `<div class="cell ${!p.on ? 'off' : ''} ${dateStr === ds ? 'today' : ''} ${man ? 'man' : ''}" onclick="editDia('${dateStr}')">
+      <div class="dn">${+dateStr.slice(8)}</div>
+      ${p.on ? `<div class="sh">${p.ini}<br>${p.fim}</div>${alm ? `<div class="al"><i class="ti ti-tools-kitchen-2"></i> ${alm}</div>` : ''}` : `<div class="fg">Folga</div>`}</div>`;
   }
   document.getElementById('cal-grid').innerHTML = html;
 }
@@ -496,6 +710,8 @@ async function editDia(dateStr) {
   const func = funcs.find(f => f.id === State.calFunc);
   const escMes = await getEsc(State.loja.id, monthKey(State.calMonth));
   const p = planoDia(func, escMes, dateStr);
+  const auto = EscalaAuto.regraDia(func, dateStr);
+  const ref = (auto && auto.on) ? auto : (EscalaAuto.regraValida(func.regra) ? { ...EscalaAuto.DEF_SEM, ...func.regra.sem } : {});
   _segOn = null;
   const date = parseYmd(dateStr);
   openModal(`Jornada · ${date.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}`, `
@@ -508,50 +724,19 @@ async function editDia(dateStr) {
     </div>
     <div id="jfields" class="${p.on ? '' : 'hide'}" style="display:flex;flex-direction:column;gap:13px">
       <div class="row" style="gap:12px">
-        <div style="flex:1"><label class="fl">Entrada</label><input id="j-ini" class="inp" type="time" value="${p.ini || '14:00'}"></div>
-        <div style="flex:1"><label class="fl">Saída</label><input id="j-fim" class="inp" type="time" value="${p.fim || '22:00'}"></div>
+        <div style="flex:1"><label class="fl">Entrada</label><input id="j-ini" class="inp" type="time" value="${p.ini || ref.ini || '10:00'}"></div>
+        <div style="flex:1"><label class="fl">Saída</label><input id="j-fim" class="inp" type="time" value="${p.fim || ref.fim || '18:00'}"></div>
       </div>
-      <div><label class="fl">Intervalo (min)</label><input id="j-interv" class="inp" type="number" min="0" step="5" value="${p.interv != null ? p.interv : State.cfg.intervaloPadrao}"></div>
-    </div>`,
-    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: 'Salvar dia', cls: 'p', fn: `saveDia('${dateStr}')` }]);
-}
-function segOn(v) {
-  _segOn = v;
-  document.querySelectorAll('#seg-on button').forEach((b, i) => b.classList.toggle('on', (i === 0) === v));
-  document.getElementById('jfields').classList.toggle('hide', !v);
-}
-async function saveDia(dateStr) {
-  const mk = monthKey(State.calMonth);
-  const escMes = await getEsc(State.loja.id, mk);
-  const on = _segOn !== null ? _segOn : true;
-  escMes[State.calFunc] = escMes[State.calFunc] || {};
-  escMes[State.calFunc][dateStr] = on
-    ? { on: true, ini: document.getElementById('j-ini').value, fim: document.getElementById('j-fim').value, interv: +document.getElementById('j-interv').value || 0 }
-    : { on: false };
-  await setEsc(State.loja.id, mk, escMes);
-  _segOn = null; closeModal(); renderEscala(); toast('Jornada do dia salva', 'ok');
-}
-async function aplicarPadrao() {
-  const mk = monthKey(State.calMonth);
-  const funcs = await getFuncs(State.loja.id);
-  const func = funcs.find(f => f.id === State.calFunc);
-  const escMes = await getEsc(State.loja.id, mk);
-  const y = State.calMonth.getFullYear(), m = State.calMonth.getMonth(), days = new Date(y, m + 1, 0).getDate();
-  escMes[State.calFunc] = escMes[State.calFunc] || {};
-  for (let d = 1; d <= days; d++) {
-    const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const dow = parseYmd(dateStr).getDay();
-    escMes[State.calFunc][dateStr] = (func.padrao && func.padrao[dow]) ? { ...func.padrao[dow] } : { on: false };
-  }
-  await setEsc(State.loja.id, mk, escMes);
-  renderEscala(); toast('Padrão semanal aplicado ao mês', 'ok');
-}
-async function limparMes() {
-  const mk = monthKey(State.calMonth);
-  const escMes = await getEsc(State.loja.id, mk);
-  delete escMes[State.calFunc];
-  await setEsc(State.loja.id, mk, escMes);
-  renderEscala(); toast('Escala do mês limpa', 'ok');
+      <div class="row" style="gap:12px">
+        <div style="flex:1"><label class="fl">Intervalo (min)</label><input id="j-interv" class="inp" type="number" min="0" step="5" value="${p.interv != null ? p.interv : (ref.interv != null ? ref.interv : State.cfg.intervaloPadrao)}"></div>
+        <div style="flex:1"><label class="fl">Almoço às (opcional)</label><input id="j-alm" class="inp" type="time" value="${p.alm || ''}"></div>
+      </div>
+      <p class="mut" style="font-size:11.5px;margin:0">Sem horário de almoço, o sistema escalona sozinho junto com o resto da loja.</p>
+    </div>
+    ${auto ? `<p class="mut" style="font-size:11.5px;margin:0">Pelo rodízio este dia seria <b>${auto.on ? 'trabalho ' + auto.ini + '–' + auto.fim : 'folga'}</b>.</p>` : ''}`,
+    [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' },
+     ...((escMes[func.id] && escMes[func.id][dateStr]) ? [{ lbl: 'Voltar ao rodízio', cls: '', fn: `voltarRodizio('${dateStr}')` }] : []),
+     { lbl: 'Salvar dia', cls: 'p', fn: `saveDia('${dateStr}')` }]);
 }
 
 /* ============================================================
@@ -568,10 +753,13 @@ async function renderFunc() {
           const prev = mesPrevisto(f, {}, new Date());
           const dias = (f.padrao || []).filter(d => d && d.on).length;
           const ref = (f.padrao || []).find(d => d && d.on);
+          const auto = EscalaAuto.regraValida(f.regra);
           return `<tr>
             <td><div class="row" style="gap:9px"><div class="ava" style="background:${avColor(f.nome)};width:32px;height:32px;border-radius:9px;font-size:12px">${initials(f.nome)}</div><b>${esc(f.nome)}</b></div></td>
             <td class="mut">${esc(f.cargo || '—')}</td>
-            <td class="mut" style="font-size:12px">${dias} dia(s)/sem · ${ref ? ref.ini + '–' + ref.fim : '—'}</td>
+            <td class="mut" style="font-size:12px">${auto
+              ? `<span class="badge bd-bl"><i class="ti ti-refresh"></i> Rodízio</span> ${EscalaAuto.descreverRegra(f.regra)}<br>${f.regra.sem.ini}–${f.regra.sem.fim} · Dom ${f.regra.dom.ini}–${f.regra.dom.fim}`
+              : `${dias} dia(s)/sem · ${ref ? ref.ini + '–' + ref.fim : '—'}`}</td>
             <td class="mono">${fmtH(prev)}</td>
             <td style="text-align:right;white-space:nowrap">
               <button class="btn sm" onclick="novoFunc('${f.id}')"><i class="ti ti-edit"></i></button>
@@ -582,20 +770,68 @@ async function renderFunc() {
     </div>`;
 }
 let _padrao = null;
+let _fm = null; // estado do formulário de funcionário (modo + regra de rodízio)
 function defPadrao() { return [{ on: false }, ...[1, 2, 3, 4, 5, 6].map(() => ({ on: true, ini: '14:00', fim: '22:00', interv: 60 }))]; }
 function defShift(f, key) {
   const base = f && (f.padrao || []).find(d => d && d.on);
   const d = { ini: '14:00', fim: '22:00', interv: 60 };
   return base ? (base[key] != null ? base[key] : d[key]) : d[key];
 }
+function defRegra() {
+  return { modelo: 'alt', folgaFixa: 3, folga2: 1, grupoDom: 'A', sem: { ...EscalaAuto.DEF_SEM }, dom: { ...EscalaAuto.DEF_DOM } };
+}
+const fmtDM = s => { const d = parseYmd(s); return `${DOW[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const optDow = (sel, dias) => dias.map(i => `<option value="${i}" ${+sel === i ? 'selected' : ''}>${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][i]}</option>`).join('');
 async function novoFunc(id) {
   const funcs = await getFuncs(State.loja.id);
   const f = id ? funcs.find(x => x.id === id) : null;
   _padrao = f ? JSON.parse(JSON.stringify(f.padrao || defPadrao())) : defPadrao();
+  const temRegra = f && EscalaAuto.regraValida(f.regra);
+  _fm = { modo: (!f || temRegra) ? 'auto' : 'manual', regra: temRegra ? JSON.parse(JSON.stringify(f.regra)) : defRegra() };
+  const r = _fm.regra;
   openModal(f ? 'Editar funcionário' : 'Novo funcionário', `
     <div><label class="fl">Nome</label><input id="f-nome" class="inp" value="${f ? esc(f.nome) : ''}" placeholder="Nome completo"></div>
     <div><label class="fl">Cargo (opcional)</label><input id="f-cargo" class="inp" value="${f ? esc(f.cargo || '') : ''}" placeholder="Ex.: Vendedor(a)"></div>
     <div>
+      <label class="fl">Como é a escala</label>
+      <div class="seg" id="seg-modo" style="width:100%">
+        <button type="button" style="flex:1" class="${_fm.modo === 'auto' ? 'on' : ''}" onclick="fmModo('auto')"><i class="ti ti-refresh"></i> Rodízio automático</button>
+        <button type="button" style="flex:1" class="${_fm.modo === 'manual' ? 'on' : ''}" onclick="fmModo('manual')"><i class="ti ti-calendar"></i> Dias fixos</button>
+      </div>
+    </div>
+
+    <div id="fm-auto" class="${_fm.modo === 'auto' ? '' : 'hide'}" style="display:flex;flex-direction:column;gap:12px">
+      <div><label class="fl">Modelo</label>
+        <select id="r-modelo" class="inp" onchange="fmAtualiza()">
+          ${Object.entries(EscalaAuto.MODELOS).map(([k, v]) => `<option value="${k}" ${r.modelo === k ? 'selected' : ''}>${v}</option>`).join('')}
+        </select></div>
+      <div class="row" style="gap:10px">
+        <div style="flex:1"><label class="fl">Folga fixa</label><select id="r-fixa" class="inp" onchange="fmAtualiza()">${optDow(r.folgaFixa, [1, 2, 3, 4, 5, 6])}</select></div>
+        <div style="flex:1" id="r-f2-box"><label class="fl">2ª folga (semana do domingo)</label><select id="r-f2" class="inp" onchange="fmAtualiza()">${optDow(r.folga2, [1, 2, 3, 4, 5, 6])}</select></div>
+      </div>
+      <div><label class="fl">Domingo de folga</label>
+        <div class="seg" id="seg-dom" style="width:100%">
+          <button type="button" style="flex:1" class="${r.grupoDom !== 'B' ? 'on' : ''}" onclick="fmDom('A')">Grupo A</button>
+          <button type="button" style="flex:1" class="${r.grupoDom === 'B' ? 'on' : ''}" onclick="fmDom('B')">Grupo B</button>
+        </div>
+        <p class="mut" id="r-dom-hint" style="font-size:11.5px;margin:6px 0 0"></p></div>
+      <div><label class="fl">Horário de segunda a sábado</label>
+        <div class="row" style="gap:8px">
+          <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="r-s-ini" class="inp" type="time" value="${r.sem.ini}" onchange="fmAtualiza()"></div>
+          <div style="flex:1"><span class="mut" style="font-size:11px">Saída</span><input id="r-s-fim" class="inp" type="time" value="${r.sem.fim}" onchange="fmAtualiza()"></div>
+          <div style="width:90px"><span class="mut" style="font-size:11px">Almoço (min)</span><input id="r-s-int" class="inp" type="number" min="0" step="5" value="${r.sem.interv}" onchange="fmAtualiza()"></div>
+        </div></div>
+      <div><label class="fl">Horário de domingo</label>
+        <div class="row" style="gap:8px">
+          <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="r-d-ini" class="inp" type="time" value="${r.dom.ini}" onchange="fmAtualiza()"></div>
+          <div style="flex:1"><span class="mut" style="font-size:11px">Saída</span><input id="r-d-fim" class="inp" type="time" value="${r.dom.fim}" onchange="fmAtualiza()"></div>
+          <div style="width:90px"><span class="mut" style="font-size:11px">Interv. (min)</span><input id="r-d-int" class="inp" type="number" min="0" step="5" value="${r.dom.interv}" onchange="fmAtualiza()"></div>
+        </div></div>
+      <div class="fm-prev" id="r-prev"></div>
+      <p class="mut" style="font-size:11.5px;margin:0">O sistema gera as folgas de todos os meses sozinho. O horário de almoço de cada dia é escalonado pela loja (aba Escala) para nunca ficar ninguém sozinho no almoço de todos.</p>
+    </div>
+
+    <div id="fm-manual" class="${_fm.modo === 'manual' ? '' : 'hide'}">
       <label class="fl">Jornada padrão semanal</label>
       <div class="row" style="gap:8px;margin-bottom:10px">
         <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="p-ini" class="inp" type="time" value="${defShift(f, 'ini')}"></div>
@@ -608,6 +844,52 @@ async function novoFunc(id) {
       <p class="mut" style="font-size:11.5px;margin:8px 0 0">Selecione os dias de trabalho. Dias específicos você ajusta depois na aba Escala.</p>
     </div>`,
     [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: f ? 'Salvar' : 'Cadastrar', cls: 'p', fn: `saveFunc(${f ? `'${f.id}'` : 'null'})` }]);
+  fmAtualiza();
+}
+function fmModo(m) {
+  _fm.modo = m;
+  document.querySelectorAll('#seg-modo button').forEach((b, i) => b.classList.toggle('on', (i === 0) === (m === 'auto')));
+  document.getElementById('fm-auto').classList.toggle('hide', m !== 'auto');
+  document.getElementById('fm-manual').classList.toggle('hide', m !== 'manual');
+}
+function fmDom(g) {
+  _fm.regra.grupoDom = g;
+  document.querySelectorAll('#seg-dom button').forEach((b, i) => b.classList.toggle('on', (i === 0) === (g === 'A')));
+  fmAtualiza();
+}
+function fmLeRegra() {
+  const v = id => document.getElementById(id).value;
+  const r = _fm.regra;
+  r.modelo = v('r-modelo'); r.folgaFixa = +v('r-fixa'); r.folga2 = +v('r-f2');
+  r.sem = { ini: v('r-s-ini'), fim: v('r-s-fim'), interv: +v('r-s-int') || 0 };
+  r.dom = { ini: v('r-d-ini'), fim: v('r-d-fim'), interv: +v('r-d-int') || 0 };
+  return r;
+}
+function fmAtualiza() {
+  if (!document.getElementById('r-modelo')) return;
+  const r = fmLeRegra();
+  const f2box = document.getElementById('r-f2-box');
+  f2box.style.visibility = r.modelo === '5x2' ? 'visible' : 'hidden';
+  const avisos = [];
+  if (r.modelo === '5x2' && r.folga2 === r.folgaFixa) avisos.push('A 2ª folga precisa ser diferente da folga fixa.');
+  const sem = dur({ on: true, ...r.sem }), dom = dur({ on: true, ...r.dom });
+  const jSem = toMin(r.sem.fim) - toMin(r.sem.ini), jDom = toMin(r.dom.fim) - toMin(r.dom.ini);
+  if (jSem > 360 && r.sem.interv < 60) avisos.push('Jornada acima de 6h pede intervalo de no mínimo 1h (CLT, art. 71).');
+  if (jDom > 360 && r.dom.interv < 60) avisos.push('Domingo acima de 6h pede intervalo de no mínimo 1h.');
+  else if (jDom > 240 && jDom <= 360 && r.dom.interv < 15) avisos.push('Domingo entre 4h e 6h pede intervalo de 15 min.');
+  const fake = { id: '_prev', regra: r };
+  const hoje = todayStr();
+  const prox = EscalaAuto.proximasFolgas(fake, {}, hoje, 8);
+  const domProx = prox.find(s => parseYmd(s).getDay() === 0);
+  document.getElementById('r-dom-hint').textContent = domProx ? `Próximo domingo de folga: ${fmtDM(domProx)} (e depois a cada 2 semanas)` : '';
+  const semanas = [0, 7].map(off => { const d0 = parseYmd(hoje); d0.setDate(d0.getDate() - ((d0.getDay() + 6) % 7) + off);
+    let t = 0; for (let i = 0; i < 7; i++) { const d = new Date(d0); d.setDate(d0.getDate() + i); t += dur(EscalaAuto.regraDia(fake, ymd(d))); } return t; });
+  document.getElementById('r-prev').innerHTML = `
+    <div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <span><i class="ti ti-calendar-off"></i> <b>Próximas folgas:</b> ${prox.map(fmtDM).join(' · ')}</span>
+    </div>
+    <div class="mut" style="font-size:12px;margin-top:4px">Horas por semana: ${fmtH(semanas[0])} e ${fmtH(semanas[1])} (alternando) · dia útil ${fmtH(sem)} · domingo ${fmtH(dom)}</div>
+    ${avisos.map(a => `<div class="badge bd-am" style="margin-top:6px"><i class="ti ti-alert-triangle"></i> ${a}</div>`).join('')}`;
 }
 function toggleDow(i) {
   _padrao[i] = _padrao[i] && _padrao[i].on ? { on: false } : { on: true };
@@ -616,14 +898,23 @@ function toggleDow(i) {
 async function saveFunc(id) {
   const nome = document.getElementById('f-nome').value.trim();
   if (!nome) { toast('Informe o nome', 'warn'); return; }
-  const ini = document.getElementById('p-ini').value, fim = document.getElementById('p-fim').value, interv = +document.getElementById('p-interv').value || 0;
-  const padrao = _padrao.map(d => d && d.on ? { on: true, ini, fim, interv } : { on: false });
   const cargo = document.getElementById('f-cargo').value.trim();
+  let regra = null, padrao;
+  if (_fm && _fm.modo === 'auto') {
+    regra = fmLeRegra();
+    if (regra.modelo !== '5x2') delete regra.folga2;
+    else if (regra.folga2 === regra.folgaFixa) { toast('A 2ª folga precisa ser diferente da folga fixa', 'warn'); return; }
+    padrao = [0, 1, 2, 3, 4, 5, 6].map(d => d === 0 ? { on: true, ...regra.dom } : d === regra.folgaFixa ? { on: false } : { on: true, ...regra.sem });
+  } else {
+    const ini = document.getElementById('p-ini').value, fim = document.getElementById('p-fim').value, interv = +document.getElementById('p-interv').value || 0;
+    padrao = _padrao.map(d => d && d.on ? { on: true, ini, fim, interv } : { on: false });
+  }
   const funcs = await getFuncs(State.loja.id);
-  if (id) { const f = funcs.find(x => x.id === id); f.nome = nome; f.cargo = cargo; f.padrao = padrao; }
-  else funcs.push({ id: 'f' + Date.now().toString(36), nome, cargo, padrao });
+  if (id) { const f = funcs.find(x => x.id === id); f.nome = nome; f.cargo = cargo; f.padrao = padrao; if (regra) f.regra = regra; else delete f.regra; }
+  else { const nf = { id: 'f' + Date.now().toString(36), nome, cargo, padrao }; if (regra) nf.regra = regra; funcs.push(nf); }
   await setFuncs(State.loja.id, funcs);
-  closeModal(); renderFunc(); toast(id ? 'Funcionário atualizado' : 'Funcionário cadastrado', 'ok');
+  closeModal(); if (State.tab === 'escala') renderEscala(); else renderFunc();
+  toast(id ? 'Funcionário atualizado' : 'Funcionário cadastrado', 'ok');
 }
 async function delFunc(id) {
   if (!confirm('Remover este funcionário? Os registros já lançados são mantidos.')) return;
