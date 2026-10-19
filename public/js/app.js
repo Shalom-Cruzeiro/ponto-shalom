@@ -753,13 +753,10 @@ async function renderFunc() {
           const prev = mesPrevisto(f, {}, new Date());
           const dias = (f.padrao || []).filter(d => d && d.on).length;
           const ref = (f.padrao || []).find(d => d && d.on);
-          const auto = EscalaAuto.regraValida(f.regra);
           return `<tr>
             <td><div class="row" style="gap:9px"><div class="ava" style="background:${avColor(f.nome)};width:32px;height:32px;border-radius:9px;font-size:12px">${initials(f.nome)}</div><b>${esc(f.nome)}</b></div></td>
             <td class="mut">${esc(f.cargo || '—')}</td>
-            <td class="mut" style="font-size:12px">${auto
-              ? `<span class="badge bd-bl"><i class="ti ti-refresh"></i> Rodízio</span> ${EscalaAuto.descreverRegra(f.regra)}<br>${f.regra.sem.ini}–${f.regra.sem.fim} · Dom ${f.regra.dom.ini}–${f.regra.dom.fim}`
-              : `${dias} dia(s)/sem · ${ref ? ref.ini + '–' + ref.fim : '—'}`}</td>
+            <td class="mut" style="font-size:12px">${dias} dia(s)/sem · ${ref ? ref.ini + '–' + ref.fim : '—'}</td>
             <td class="mono">${fmtH(prev)}</td>
             <td style="text-align:right;white-space:nowrap">
               <button class="btn sm" onclick="novoFunc('${f.id}')"><i class="ti ti-edit"></i></button>
@@ -770,68 +767,20 @@ async function renderFunc() {
     </div>`;
 }
 let _padrao = null;
-let _fm = null; // estado do formulário de funcionário (modo + regra de rodízio)
 function defPadrao() { return [{ on: false }, ...[1, 2, 3, 4, 5, 6].map(() => ({ on: true, ini: '14:00', fim: '22:00', interv: 60 }))]; }
 function defShift(f, key) {
   const base = f && (f.padrao || []).find(d => d && d.on);
   const d = { ini: '14:00', fim: '22:00', interv: 60 };
   return base ? (base[key] != null ? base[key] : d[key]) : d[key];
 }
-function defRegra() {
-  return { modelo: 'alt', folgaFixa: 3, folga2: 1, grupoDom: 'A', sem: { ...EscalaAuto.DEF_SEM }, dom: { ...EscalaAuto.DEF_DOM } };
-}
-const fmtDM = s => { const d = parseYmd(s); return `${DOW[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const optDow = (sel, dias) => dias.map(i => `<option value="${i}" ${+sel === i ? 'selected' : ''}>${['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'][i]}</option>`).join('');
 async function novoFunc(id) {
   const funcs = await getFuncs(State.loja.id);
   const f = id ? funcs.find(x => x.id === id) : null;
   _padrao = f ? JSON.parse(JSON.stringify(f.padrao || defPadrao())) : defPadrao();
-  const temRegra = f && EscalaAuto.regraValida(f.regra);
-  _fm = { modo: (!f || temRegra) ? 'auto' : 'manual', regra: temRegra ? JSON.parse(JSON.stringify(f.regra)) : defRegra() };
-  const r = _fm.regra;
   openModal(f ? 'Editar funcionário' : 'Novo funcionário', `
     <div><label class="fl">Nome</label><input id="f-nome" class="inp" value="${f ? esc(f.nome) : ''}" placeholder="Nome completo"></div>
     <div><label class="fl">Cargo (opcional)</label><input id="f-cargo" class="inp" value="${f ? esc(f.cargo || '') : ''}" placeholder="Ex.: Vendedor(a)"></div>
     <div>
-      <label class="fl">Como é a escala</label>
-      <div class="seg" id="seg-modo" style="width:100%">
-        <button type="button" style="flex:1" class="${_fm.modo === 'auto' ? 'on' : ''}" onclick="fmModo('auto')"><i class="ti ti-refresh"></i> Rodízio automático</button>
-        <button type="button" style="flex:1" class="${_fm.modo === 'manual' ? 'on' : ''}" onclick="fmModo('manual')"><i class="ti ti-calendar"></i> Dias fixos</button>
-      </div>
-    </div>
-
-    <div id="fm-auto" class="${_fm.modo === 'auto' ? '' : 'hide'}" style="display:flex;flex-direction:column;gap:12px">
-      <div><label class="fl">Modelo</label>
-        <select id="r-modelo" class="inp" onchange="fmAtualiza()">
-          ${Object.entries(EscalaAuto.MODELOS).map(([k, v]) => `<option value="${k}" ${r.modelo === k ? 'selected' : ''}>${v}</option>`).join('')}
-        </select></div>
-      <div class="row" style="gap:10px">
-        <div style="flex:1"><label class="fl">Folga fixa</label><select id="r-fixa" class="inp" onchange="fmAtualiza()">${optDow(r.folgaFixa, [1, 2, 3, 4, 5, 6])}</select></div>
-        <div style="flex:1" id="r-f2-box"><label class="fl">2ª folga (semana do domingo)</label><select id="r-f2" class="inp" onchange="fmAtualiza()">${optDow(r.folga2, [1, 2, 3, 4, 5, 6])}</select></div>
-      </div>
-      <div><label class="fl">Domingo de folga</label>
-        <div class="seg" id="seg-dom" style="width:100%">
-          <button type="button" style="flex:1" class="${r.grupoDom !== 'B' ? 'on' : ''}" onclick="fmDom('A')">Grupo A</button>
-          <button type="button" style="flex:1" class="${r.grupoDom === 'B' ? 'on' : ''}" onclick="fmDom('B')">Grupo B</button>
-        </div>
-        <p class="mut" id="r-dom-hint" style="font-size:11.5px;margin:6px 0 0"></p></div>
-      <div><label class="fl">Horário de segunda a sábado</label>
-        <div class="row" style="gap:8px">
-          <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="r-s-ini" class="inp" type="time" value="${r.sem.ini}" onchange="fmAtualiza()"></div>
-          <div style="flex:1"><span class="mut" style="font-size:11px">Saída</span><input id="r-s-fim" class="inp" type="time" value="${r.sem.fim}" onchange="fmAtualiza()"></div>
-          <div style="width:90px"><span class="mut" style="font-size:11px">Almoço (min)</span><input id="r-s-int" class="inp" type="number" min="0" step="5" value="${r.sem.interv}" onchange="fmAtualiza()"></div>
-        </div></div>
-      <div><label class="fl">Horário de domingo</label>
-        <div class="row" style="gap:8px">
-          <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="r-d-ini" class="inp" type="time" value="${r.dom.ini}" onchange="fmAtualiza()"></div>
-          <div style="flex:1"><span class="mut" style="font-size:11px">Saída</span><input id="r-d-fim" class="inp" type="time" value="${r.dom.fim}" onchange="fmAtualiza()"></div>
-          <div style="width:90px"><span class="mut" style="font-size:11px">Interv. (min)</span><input id="r-d-int" class="inp" type="number" min="0" step="5" value="${r.dom.interv}" onchange="fmAtualiza()"></div>
-        </div></div>
-      <div class="fm-prev" id="r-prev"></div>
-      <p class="mut" style="font-size:11.5px;margin:0">O sistema gera as folgas de todos os meses sozinho. O horário de almoço de cada dia é escalonado pela loja (aba Escala) para nunca ficar ninguém sozinho no almoço de todos.</p>
-    </div>
-
-    <div id="fm-manual" class="${_fm.modo === 'manual' ? '' : 'hide'}">
       <label class="fl">Jornada padrão semanal</label>
       <div class="row" style="gap:8px;margin-bottom:10px">
         <div style="flex:1"><span class="mut" style="font-size:11px">Entrada</span><input id="p-ini" class="inp" type="time" value="${defShift(f, 'ini')}"></div>
@@ -841,55 +790,9 @@ async function novoFunc(id) {
       <div class="row" id="dow-row" style="gap:6px">
         ${DOW.map((d, i) => `<button type="button" class="btn sm ${_padrao[i] && _padrao[i].on ? 'p' : ''}" data-d="${i}" onclick="toggleDow(${i})" style="flex:1;min-width:40px">${d}</button>`).join('')}
       </div>
-      <p class="mut" style="font-size:11.5px;margin:8px 0 0">Selecione os dias de trabalho. Dias específicos você ajusta depois na aba Escala.</p>
+      <p class="mut" style="font-size:11.5px;margin:8px 0 0">Selecione os dias de trabalho. Você ajusta dias específicos depois na aba Escala.</p>
     </div>`,
     [{ lbl: 'Cancelar', cls: '', fn: 'closeModal()' }, { lbl: f ? 'Salvar' : 'Cadastrar', cls: 'p', fn: `saveFunc(${f ? `'${f.id}'` : 'null'})` }]);
-  fmAtualiza();
-}
-function fmModo(m) {
-  _fm.modo = m;
-  document.querySelectorAll('#seg-modo button').forEach((b, i) => b.classList.toggle('on', (i === 0) === (m === 'auto')));
-  document.getElementById('fm-auto').classList.toggle('hide', m !== 'auto');
-  document.getElementById('fm-manual').classList.toggle('hide', m !== 'manual');
-}
-function fmDom(g) {
-  _fm.regra.grupoDom = g;
-  document.querySelectorAll('#seg-dom button').forEach((b, i) => b.classList.toggle('on', (i === 0) === (g === 'A')));
-  fmAtualiza();
-}
-function fmLeRegra() {
-  const v = id => document.getElementById(id).value;
-  const r = _fm.regra;
-  r.modelo = v('r-modelo'); r.folgaFixa = +v('r-fixa'); r.folga2 = +v('r-f2');
-  r.sem = { ini: v('r-s-ini'), fim: v('r-s-fim'), interv: +v('r-s-int') || 0 };
-  r.dom = { ini: v('r-d-ini'), fim: v('r-d-fim'), interv: +v('r-d-int') || 0 };
-  return r;
-}
-function fmAtualiza() {
-  if (!document.getElementById('r-modelo')) return;
-  const r = fmLeRegra();
-  const f2box = document.getElementById('r-f2-box');
-  f2box.style.visibility = r.modelo === '5x2' ? 'visible' : 'hidden';
-  const avisos = [];
-  if (r.modelo === '5x2' && r.folga2 === r.folgaFixa) avisos.push('A 2ª folga precisa ser diferente da folga fixa.');
-  const sem = dur({ on: true, ...r.sem }), dom = dur({ on: true, ...r.dom });
-  const jSem = toMin(r.sem.fim) - toMin(r.sem.ini), jDom = toMin(r.dom.fim) - toMin(r.dom.ini);
-  if (jSem > 360 && r.sem.interv < 60) avisos.push('Jornada acima de 6h pede intervalo de no mínimo 1h (CLT, art. 71).');
-  if (jDom > 360 && r.dom.interv < 60) avisos.push('Domingo acima de 6h pede intervalo de no mínimo 1h.');
-  else if (jDom > 240 && jDom <= 360 && r.dom.interv < 15) avisos.push('Domingo entre 4h e 6h pede intervalo de 15 min.');
-  const fake = { id: '_prev', regra: r };
-  const hoje = todayStr();
-  const prox = EscalaAuto.proximasFolgas(fake, {}, hoje, 8);
-  const domProx = prox.find(s => parseYmd(s).getDay() === 0);
-  document.getElementById('r-dom-hint').textContent = domProx ? `Próximo domingo de folga: ${fmtDM(domProx)} (e depois a cada 2 semanas)` : '';
-  const semanas = [0, 7].map(off => { const d0 = parseYmd(hoje); d0.setDate(d0.getDate() - ((d0.getDay() + 6) % 7) + off);
-    let t = 0; for (let i = 0; i < 7; i++) { const d = new Date(d0); d.setDate(d0.getDate() + i); t += dur(EscalaAuto.regraDia(fake, ymd(d))); } return t; });
-  document.getElementById('r-prev').innerHTML = `
-    <div class="row" style="justify-content:space-between;gap:8px;flex-wrap:wrap">
-      <span><i class="ti ti-calendar-off"></i> <b>Próximas folgas:</b> ${prox.map(fmtDM).join(' · ')}</span>
-    </div>
-    <div class="mut" style="font-size:12px;margin-top:4px">Horas por semana: ${fmtH(semanas[0])} e ${fmtH(semanas[1])} (alternando) · dia útil ${fmtH(sem)} · domingo ${fmtH(dom)}</div>
-    ${avisos.map(a => `<div class="badge bd-am" style="margin-top:6px"><i class="ti ti-alert-triangle"></i> ${a}</div>`).join('')}`;
 }
 function toggleDow(i) {
   _padrao[i] = _padrao[i] && _padrao[i].on ? { on: false } : { on: true };
@@ -898,23 +801,20 @@ function toggleDow(i) {
 async function saveFunc(id) {
   const nome = document.getElementById('f-nome').value.trim();
   if (!nome) { toast('Informe o nome', 'warn'); return; }
+  const ini = document.getElementById('p-ini').value, fim = document.getElementById('p-fim').value, interv = +document.getElementById('p-interv').value || 0;
+  const padrao = _padrao.map(d => d && d.on ? { on: true, ini, fim, interv } : { on: false });
+  // Validações: máx 5 dias e máx 42h semanais
+  const diasOn = padrao.filter(d => d && d.on).length;
+  if (diasOn > 5) { toast('Máximo 5 dias trabalhados por semana', 'warn'); return; }
+  const minDia = toMin(fim) - toMin(ini) - interv;
+  const totalMin = diasOn * minDia;
+  if (totalMin > 42 * 60) { toast(`Jornada semanal de ${fmtH(totalMin)} ultrapassa o limite de 42h`, 'warn'); return; }
   const cargo = document.getElementById('f-cargo').value.trim();
-  let regra = null, padrao;
-  if (_fm && _fm.modo === 'auto') {
-    regra = fmLeRegra();
-    if (regra.modelo !== '5x2') delete regra.folga2;
-    else if (regra.folga2 === regra.folgaFixa) { toast('A 2ª folga precisa ser diferente da folga fixa', 'warn'); return; }
-    padrao = [0, 1, 2, 3, 4, 5, 6].map(d => d === 0 ? { on: true, ...regra.dom } : d === regra.folgaFixa ? { on: false } : { on: true, ...regra.sem });
-  } else {
-    const ini = document.getElementById('p-ini').value, fim = document.getElementById('p-fim').value, interv = +document.getElementById('p-interv').value || 0;
-    padrao = _padrao.map(d => d && d.on ? { on: true, ini, fim, interv } : { on: false });
-  }
   const funcs = await getFuncs(State.loja.id);
-  if (id) { const f = funcs.find(x => x.id === id); f.nome = nome; f.cargo = cargo; f.padrao = padrao; if (regra) f.regra = regra; else delete f.regra; }
-  else { const nf = { id: 'f' + Date.now().toString(36), nome, cargo, padrao }; if (regra) nf.regra = regra; funcs.push(nf); }
+  if (id) { const f = funcs.find(x => x.id === id); f.nome = nome; f.cargo = cargo; f.padrao = padrao; delete f.regra; }
+  else funcs.push({ id: 'f' + Date.now().toString(36), nome, cargo, padrao });
   await setFuncs(State.loja.id, funcs);
-  closeModal(); if (State.tab === 'escala') renderEscala(); else renderFunc();
-  toast(id ? 'Funcionário atualizado' : 'Funcionário cadastrado', 'ok');
+  closeModal(); renderFunc(); toast(id ? 'Funcionário atualizado' : 'Funcionário cadastrado', 'ok');
 }
 async function delFunc(id) {
   if (!confirm('Remover este funcionário? Os registros já lançados são mantidos.')) return;
